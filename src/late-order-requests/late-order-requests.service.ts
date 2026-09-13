@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
 import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
@@ -122,9 +122,11 @@ export class LateOrderRequestsService {
           .returningAll()
           .executeTakeFirstOrThrow();
 
+        await sql`release savepoint sp_checkout`.execute(trx);
         return { outcome: 'accepted', response: toResponse(updated), customerId: req.customer_id };
       } catch (error) {
         if (error instanceof DomainException) {
+          await sql`rollback to savepoint sp_checkout`.execute(trx);
           await trx
             .updateTable('late_order_requests')
             .set({
