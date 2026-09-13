@@ -15,16 +15,18 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "migrate": "node -r dotenv/config node_modules/.bin/node-pg-migrate --migration-file-language sql -m migrations",
-    "migrate:up": "node -r dotenv/config node_modules/.bin/node-pg-migrate up --migration-file-language sql -m migrations",
-    "migrate:down": "node -r dotenv/config node_modules/.bin/node-pg-migrate down --migration-file-language sql -m migrations",
+    "migrate": "node-pg-migrate --migration-file-language sql -m migrations",
+    "migrate:up": "node-pg-migrate up --migration-file-language sql -m migrations",
+    "migrate:down": "node-pg-migrate down --migration-file-language sql -m migrations",
     "migrate:create": "node-pg-migrate create --migration-file-language sql -m migrations"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
     "@nestjs/config": "^3.3.0",
     "@nestjs/core": "^10.4.15",
+    "@nestjs/jwt": "^12.0.1",
     "@nestjs/platform-express": "^10.4.15",
+    "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "dotenv": "^16.4.7",
@@ -38,6 +40,7 @@
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@nestjs/testing": "^10.4.15",
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.2",
@@ -61,13 +64,19 @@
     "typescript": "^5.7.2"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
-    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }

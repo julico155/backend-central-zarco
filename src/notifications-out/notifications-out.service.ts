@@ -92,7 +92,7 @@ export class NotificationsOutService {
       await this.gateway.requestWhatsappLocation(job.payload as never);
       return undefined;
     }
-    await this.gateway.sendWhatsappMessage(job.payload as never);
-    return undefined;
+    const result = await this.gateway.sendWhatsappMessage(job.payload as never);
+    return result.externalMessageId;
   }
 }

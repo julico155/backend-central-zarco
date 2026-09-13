@@ -11,6 +11,10 @@ export interface AppConfig {
     baseUrl: string;
     authToken: string;
   };
+  jwt: {
+    secret: string;
+    expiresIn: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -36,5 +40,9 @@ export default (): AppConfig => ({
   gateway: {
     baseUrl: process.env.GATEWAY_BASE_URL ?? '',
     authToken: process.env.GATEWAY_AUTH_TOKEN ?? '',
+  },
+  jwt: {
+    secret: process.env.JWT_SECRET ?? '',
+    expiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
   },
 });

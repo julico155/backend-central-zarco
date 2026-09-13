@@ -25,6 +25,10 @@ export interface TelegramAlertResult {
   externalMessageId: string;
 }
 
+export interface WhatsappMessageResult {
+  externalMessageId: string;
+}
+
 /**
  * Cliente HTTP hacia el "gateway API" de saas_smarky. El backend central
  * nunca sabe qué es WhatsApp/Kapso/Telegram — solo llama a estos tres
@@ -36,8 +40,8 @@ export class GatewayClientService {
 
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
 
-  async sendWhatsappMessage(payload: WhatsappMessagePayload): Promise<void> {
-    await this.post('/gateway/whatsapp/messages', payload);
+  async sendWhatsappMessage(payload: WhatsappMessagePayload): Promise<WhatsappMessageResult> {
+    return this.post<WhatsappMessageResult>('/gateway/whatsapp/messages', payload);
   }
 
   async requestWhatsappLocation(payload: WhatsappLocationRequestPayload): Promise<void> {

@@ -1,3 +1,4 @@
+-- Up Migration
 -- Tabla de bandas de tarifa: fuente única (ya no duplicada en SQL + TS).
 create table delivery_tariff_bands (
   band_index          integer primary key,
@@ -20,3 +21,7 @@ create table delivery_quote_requests (
   error_code       text,
   created_at       timestamptz not null default now()
 );
+
+-- Down Migration
+drop table if exists delivery_quote_requests;
+drop table if exists delivery_tariff_bands;

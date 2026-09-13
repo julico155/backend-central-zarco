@@ -1,3 +1,4 @@
+-- Up Migration
 -- Catálogo: categorías normalizadas (reemplazan el enum plato|bebida|extra)
 -- y productos (antes menu_items).
 
@@ -26,3 +27,7 @@ create table products (
 );
 
 create index idx_products_category_id on products (category_id);
+
+-- Down Migration
+drop table if exists products;
+drop table if exists categories;

@@ -1,3 +1,4 @@
+-- Up Migration
 create table payment_attempts (
   id             uuid primary key default gen_random_uuid(),
   order_id       uuid not null references orders(id) on delete restrict,
@@ -61,3 +62,7 @@ create index idx_payment_proofs_routing_exception
 create index idx_payment_proofs_unassigned
   on payment_proofs (match_method)
   where order_id is null;
+
+-- Down Migration
+drop table if exists payment_proofs;
+drop table if exists payment_attempts;

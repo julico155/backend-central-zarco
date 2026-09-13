@@ -1,4 +1,13 @@
-import { IsBoolean, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsLatitude,
+  IsLongitude,
+  IsNumber,
+  IsOptional,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class UpdateOperationalSettingsDto {
   @IsOptional()
@@ -27,4 +36,12 @@ export class UpdateOperationalSettingsDto {
   @Min(0)
   @Max(23)
   lateReviewClosesHour?: number;
+
+  @IsOptional()
+  @IsLatitude()
+  restaurantLatitude?: number;
+
+  @IsOptional()
+  @IsLongitude()
+  restaurantLongitude?: number;
 }

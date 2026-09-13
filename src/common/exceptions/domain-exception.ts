@@ -22,23 +22,27 @@ export class ValidationError extends DomainException {
 }
 
 export class ProductUnavailableError extends DomainException {
-  constructor(productId: string, reason: 'inactive' | 'sold_out') {
+  constructor(
+    productId: string,
+    reason: 'inactive' | 'sold_out',
+    unavailableProductIds?: string[],
+  ) {
     super(
       'product_unavailable',
       HttpStatus.CONFLICT,
       `El producto ${productId} no está disponible (${reason}).`,
-      { productId, reason },
+      { productId, reason, unavailableProductIds: unavailableProductIds ?? [productId] },
     );
   }
 }
 
 export class PromotionUnavailableError extends DomainException {
-  constructor(promotionId: string, reason: string) {
+  constructor(promotionId: string, reason: string, unavailablePromotionIds?: string[]) {
     super(
       'promotion_unavailable',
       HttpStatus.CONFLICT,
       `La promoción ${promotionId} no está disponible (${reason}).`,
-      { promotionId, reason },
+      { promotionId, reason, unavailablePromotionIds: unavailablePromotionIds ?? [promotionId] },
     );
   }
 }

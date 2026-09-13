@@ -10,24 +10,32 @@ export interface OperationalSettingsResponse {
   businessOpensHour: number;
   businessClosesHour: number;
   lateReviewClosesHour: number;
+  restaurantLatitude: number | null;
+  restaurantLongitude: number | null;
 }
 
 /**
- * Horario de atención + recargo por lluvia — fila única (id = true).
- * El gate de horario (invariante 7) y la cotización de delivery (que congela
- * el recargo en la misma transacción) leen de aquí.
+ * Horario de atención + recargo por lluvia + coordenadas del restaurante —
+ * fila única (id = true). El gate de horario (invariante 7), la medición de
+ * distancia de delivery y la cotización (que congela el recargo en la misma
+ * transacción) leen de aquí.
  */
 @Injectable()
 export class OperationalSettingsService {
   constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
 
   async get(): Promise<OperationalSettingsResponse> {
-    const row = await this.db
+    const row = await this.getRow();
+    return toResponse(row);
+  }
+
+  /** Fila cruda tal como está en BD — para consumo interno de otros módulos (delivery, orders). */
+  async getRow() {
+    return this.db
       .selectFrom('operational_settings')
       .selectAll()
       .where('id', '=', true)
       .executeTakeFirstOrThrow();
-    return toResponse(row);
   }
 
   async update(dto: UpdateOperationalSettingsDto): Promise<OperationalSettingsResponse> {
@@ -49,6 +57,12 @@ export class OperationalSettingsService {
         ...(dto.lateReviewClosesHour !== undefined
           ? { late_review_closes_hour: dto.lateReviewClosesHour }
           : {}),
+        ...(dto.restaurantLatitude !== undefined
+          ? { restaurant_latitude: dto.restaurantLatitude }
+          : {}),
+        ...(dto.restaurantLongitude !== undefined
+          ? { restaurant_longitude: dto.restaurantLongitude }
+          : {}),
         updated_at: new Date(),
       })
       .where('id', '=', true)
@@ -64,6 +78,8 @@ function toResponse(row: {
   business_opens_hour: number;
   business_closes_hour: number;
   late_review_closes_hour: number;
+  restaurant_latitude: number | null;
+  restaurant_longitude: number | null;
 }): OperationalSettingsResponse {
   return {
     rainSurchargeEnabled: row.rain_surcharge_enabled,
@@ -71,5 +87,7 @@ function toResponse(row: {
     businessOpensHour: row.business_opens_hour,
     businessClosesHour: row.business_closes_hour,
     lateReviewClosesHour: row.late_review_closes_hour,
+    restaurantLatitude: row.restaurant_latitude,
+    restaurantLongitude: row.restaurant_longitude,
   };
 }

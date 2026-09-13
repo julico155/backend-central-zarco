@@ -1,3 +1,4 @@
+-- Up Migration
 create table promotions (
   id           uuid primary key default gen_random_uuid(),
   name         text not null check (char_length(btrim(name)) between 1 and 80),
@@ -39,3 +40,8 @@ create table order_promotions (
     subtotal = promo_price_snapshot * combo_quantity
   )
 );
+
+-- Down Migration
+drop table if exists order_promotions;
+drop table if exists promotion_items;
+drop table if exists promotions;

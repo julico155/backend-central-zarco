@@ -1,3 +1,4 @@
+-- Up Migration
 -- Cliente como entidad normal, reemplaza el string customer_phone repetido
 -- en cada tabla del diseño anterior.
 
@@ -12,3 +13,6 @@ create table customers (
     phone is not null or email is not null or name is not null
   )
 );
+
+-- Down Migration
+drop table if exists customers;

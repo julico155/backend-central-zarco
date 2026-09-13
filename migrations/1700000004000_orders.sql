@@ -1,3 +1,4 @@
+-- Up Migration
 -- Pedidos y líneas, con snapshot de nombre/precio (invariante 3: un pedido
 -- histórico nunca se recalcula desde el catálogo vigente).
 
@@ -58,3 +59,8 @@ create table order_items (
 );
 
 create index idx_order_items_order_id on order_items (order_id);
+
+-- Down Migration
+drop table if exists order_items;
+drop table if exists orders;
+drop sequence if exists order_number_seq;

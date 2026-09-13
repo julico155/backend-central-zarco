@@ -1,8 +1,10 @@
-import { Inject, Injectable, NotImplementedException } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { NotFoundDomainError } from '../common/exceptions/domain-exception';
+import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
+import { NotificationsOutService } from '../notifications-out/notifications-out.service';
+import { OrdersService } from '../orders/orders.service';
 
 export interface LateOrderRequestResponse {
   id: string;
@@ -16,16 +18,31 @@ export interface LateOrderRequestResponse {
   orderId: string | null;
 }
 
+type AcceptOutcome =
+  | { outcome: 'not_found' }
+  | { outcome: 'repeated'; response: LateOrderRequestResponse }
+  | { outcome: 'already_settled'; status: string }
+  | { outcome: 'expired' }
+  | { outcome: 'order_unavailable'; reasonCode: string }
+  | { outcome: 'accepted'; response: LateOrderRequestResponse; customerId: string | null };
+
 /**
- * ESQUELETO: la creación la dispara internamente OrdersService.create al
- * caer en ventana late_review — no hay un DTO público de creación todavía
- * porque depende de que orders.create exista (fase 3 antes que fase 6, ver
- * plan). accept/reject quedan como stubs con el contrato transaccional
- * exacto que hay que respetar.
+ * Portado de `decide_late_order_request` / `accept_late_order_request`
+ * (saas_smarky, `0029_promotions.sql`). `accept` bloquea, revalida el
+ * carrito ENTERO por el mismo camino que un checkout normal
+ * (OrdersService.createOrderInTransaction) y solo entonces marca
+ * 'accepted' con su order_id — todo en una transacción, para que nunca
+ * quede "aceptada sin pedido".
  */
 @Injectable()
 export class LateOrderRequestsService {
-  constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
+  private readonly logger = new Logger(LateOrderRequestsService.name);
+
+  constructor(
+    @Inject(KYSELY) private readonly db: Kysely<Database>,
+    private readonly ordersService: OrdersService,
+    private readonly notifications: NotificationsOutService,
+  ) {}
 
   async findById(id: string): Promise<LateOrderRequestResponse> {
     const row = await this.db
@@ -37,27 +54,186 @@ export class LateOrderRequestsService {
     return toResponse(row);
   }
 
-  /**
-   * TODO: en una sola transacción — bloquear la solicitud (WHERE status =
-   * 'pending', mismo espíritu de CAS que payment_attempts), crear el pedido
-   * real reusando el mismo camino que OrdersService.create, enlazar
-   * order_id, y solo entonces marcar status='accepted'. Si algo falla, todo
-   * se revierte (nunca "aceptada sin pedido" — constraint
-   * late_order_requests_order_only_when_accepted ya lo garantiza a nivel de
-   * esquema, pero la transacción de aplicación tiene que respetarlo).
-   * Luego: avisar al mostrador (Telegram, editando el mensaje de alerta
-   * original) y al cliente (WhatsApp) vía NotificationsOutService.
-   */
-  async accept(_id: string, _decidedBy: string): Promise<LateOrderRequestResponse> {
-    throw new NotImplementedException('POST /late-order-requests/:id/accept pendiente.');
+  async accept(id: string, decidedBy: string): Promise<LateOrderRequestResponse> {
+    const decidedAt = new Date();
+
+    const result = await this.db.transaction().execute(async (trx): Promise<AcceptOutcome> => {
+      const req = await trx
+        .selectFrom('late_order_requests')
+        .selectAll()
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!req) return { outcome: 'not_found' };
+
+      if (req.status !== 'pending') {
+        if (req.status === 'accepted') return { outcome: 'repeated', response: toResponse(req) };
+        return { outcome: 'already_settled', status: req.status };
+      }
+
+      if (new Date(req.expires_at) <= decidedAt) {
+        await trx
+          .updateTable('late_order_requests')
+          .set({
+            status: 'expired',
+            decided_at: decidedAt,
+            decided_by: 'system',
+            updated_at: decidedAt,
+          })
+          .where('id', '=', id)
+          .execute();
+        return { outcome: 'expired' };
+      }
+
+      // Los fallos permanentes (producto/promo caídos, etc.) NO se
+      // reintentan: se atrapan y la solicitud queda 'rejected' con motivo
+      // propio — nunca un bucle. SAVEPOINT explícito (no confiar en que
+      // createOrderInTransaction valide todo ANTES de escribir): si algo
+      // ahí dentro escribe y LUEGO falla, esto deshace exactamente eso, sin
+      // tirar abajo la transacción completa (que también bloquea la fila
+      // de late_order_requests).
+      await sql`savepoint sp_checkout`.execute(trx);
+      try {
+        const order = await this.ordersService.createOrderInTransaction(trx, {
+          customerId: req.customer_id,
+          channel: req.channel,
+          customerName: req.customer_name,
+          deliveryType: req.delivery_type,
+          paymentMethod: req.payment_method,
+          notes: req.notes,
+          items: req.items_json as unknown as { productId: string; quantity: number }[],
+          promotions: req.promotions_json as unknown as {
+            promotionId: string;
+            quantity: number;
+            revision: number;
+          }[],
+        });
+
+        const updated = await trx
+          .updateTable('late_order_requests')
+          .set({
+            status: 'accepted',
+            decided_at: decidedAt,
+            decided_by: decidedBy,
+            order_id: order.id,
+            updated_at: decidedAt,
+          })
+          .where('id', '=', id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+
+        return { outcome: 'accepted', response: toResponse(updated), customerId: req.customer_id };
+      } catch (error) {
+        if (error instanceof DomainException) {
+          await trx
+            .updateTable('late_order_requests')
+            .set({
+              status: 'rejected',
+              decided_at: decidedAt,
+              decided_by: decidedBy,
+              updated_at: decidedAt,
+            })
+            .where('id', '=', id)
+            .execute();
+          return { outcome: 'order_unavailable', reasonCode: error.code };
+        }
+        throw error; // error inesperado: revierte TODO, incluida la expiración de arriba si aplicara
+      }
+    });
+
+    switch (result.outcome) {
+      case 'not_found':
+        throw new NotFoundDomainError('late_order_request', id);
+      case 'repeated':
+        return result.response;
+      case 'already_settled':
+        throw new DomainException(
+          'already_settled',
+          HttpStatus.CONFLICT,
+          `La solicitud ya fue decidida (status=${result.status}).`,
+        );
+      case 'expired':
+        throw new DomainException(
+          'late_order_request_expired',
+          HttpStatus.CONFLICT,
+          'La solicitud venció antes de poder aceptarse.',
+        );
+      case 'order_unavailable':
+        this.notifyCustomerBestEffort(
+          id,
+          null,
+          'No pudimos confirmar tu pedido, el carrito ya no está disponible.',
+        );
+        throw new DomainException(
+          'order_unavailable',
+          HttpStatus.CONFLICT,
+          'El pedido ya no se puede crear con el carrito original (producto o promoción caídos).',
+          { reasonCode: result.reasonCode },
+        );
+      case 'accepted':
+        this.notifyCustomerBestEffort(
+          id,
+          result.customerId,
+          `Tu pedido fue aceptado: ${result.response.orderId}.`,
+        );
+        return result.response;
+    }
   }
 
-  async reject(
-    _id: string,
-    _decidedBy: string,
-    _reason?: string,
-  ): Promise<LateOrderRequestResponse> {
-    throw new NotImplementedException('POST /late-order-requests/:id/reject pendiente.');
+  async reject(id: string, decidedBy: string, _reason?: string): Promise<LateOrderRequestResponse> {
+    const decidedAt = new Date();
+    const updated = await this.db
+      .updateTable('late_order_requests')
+      .set({
+        status: 'rejected',
+        decided_at: decidedAt,
+        decided_by: decidedBy,
+        updated_at: decidedAt,
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'pending')
+      .returningAll()
+      .executeTakeFirst();
+
+    if (updated) {
+      this.notifyCustomerBestEffort(
+        id,
+        updated.customer_id,
+        'Tu pedido no pudo confirmarse fuera de horario.',
+      );
+      return toResponse(updated);
+    }
+
+    const existing = await this.db
+      .selectFrom('late_order_requests')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!existing) throw new NotFoundDomainError('late_order_request', id);
+    if (existing.status === 'rejected') return toResponse(existing);
+    throw new DomainException(
+      'already_settled',
+      HttpStatus.CONFLICT,
+      `La solicitud ya fue decidida (status=${existing.status}).`,
+    );
+  }
+
+  private notifyCustomerBestEffort(
+    requestId: string,
+    customerId: string | null,
+    text: string,
+  ): void {
+    if (!customerId) return;
+    this.notifications
+      .notifyNow({
+        channel: 'whatsapp',
+        kind: 'late_request_decision',
+        targetRef: requestId,
+        payload: { customerId, text },
+      })
+      .catch((error: Error) =>
+        this.logger.warn(`No se pudo notificar desenlace de ${requestId}: ${error.message}`),
+      );
   }
 }
 

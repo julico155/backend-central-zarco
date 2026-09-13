@@ -1,3 +1,4 @@
+-- Up Migration
 -- Solicitudes que requieren aprobación humana antes de existir como pedido
 -- (hoy solo por horario nocturno; el mecanismo es genérico).
 
@@ -36,3 +37,6 @@ create table late_order_requests (
 create index idx_late_order_requests_pending
   on late_order_requests (expires_at)
   where status = 'pending';
+
+-- Down Migration
+drop table if exists late_order_requests;

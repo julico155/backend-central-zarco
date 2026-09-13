@@ -2,13 +2,16 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
 import { IdempotencyKey } from '../common/decorators/idempotency-key.decorator';
 import { ApiClient } from '../common/decorators/api-client.decorator';
@@ -35,15 +38,19 @@ export class OrdersController {
   }
 
   @Post('orders')
-  create(
+  async create(
     @Body() dto: CreateOrderDto,
     @IdempotencyKey() idempotencyKey: string,
     @ApiClient() apiClient: string,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.orders.create(dto, idempotencyKey, apiClient);
+    const outcome = await this.orders.create(dto, idempotencyKey, apiClient);
+    res.status(outcome.httpStatus);
+    return outcome.body;
   }
 
   @Post('orders/:id/location-request')
+  @HttpCode(204)
   requestLocation(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.requestLocation(id);
   }

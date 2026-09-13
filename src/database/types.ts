@@ -115,7 +115,7 @@ export type LateOrderRequestStatus = 'pending' | 'accepted' | 'rejected' | 'expi
 
 export interface LateOrderRequestsTable {
   id: Generated<string>;
-  request_number: string;
+  request_number: Generated<string>;
   customer_id: string | null;
   customer_name: string;
   channel: OrderChannel;
@@ -152,7 +152,7 @@ export interface DeliveryQuoteRequestsTable {
   longitude: number;
   status: DeliveryQuoteRequestStatus;
   distance_meters: number | null;
-  distance_source: 'mapbox' | 'reused' | null;
+  distance_source: 'mapbox' | 'straight_line' | 'reused' | null;
   fee_amount: string | null;
   error_code: string | null;
   created_at: Timestamp;
@@ -173,7 +173,14 @@ export interface PaymentAttemptsTable {
 }
 
 export type PaymentProofMatchMethod =
-  'current_qr_order' | 'attached' | 'duplicate' | 'ambiguous' | 'unresolved';
+  | 'reply_to_qr'
+  | 'single_open_qr_order'
+  | 'current_qr_order'
+  | 'attached'
+  | 'duplicate'
+  | 'ambiguous'
+  | 'manual'
+  | 'unresolved';
 export type PaymentProofRoutingException =
   'signal_conflict' | 'expired_target' | 'payment_already_accepted' | 'closed_order';
 export type PaymentProofCaptureStatus = 'capturing' | 'stored' | 'failed';
@@ -183,6 +190,7 @@ export type PaymentProofAnalysisVerdict = 'ok' | 'suspicious' | 'unreadable';
 export interface PaymentProofsTable {
   id: Generated<string>;
   order_id: string | null;
+  customer_id: string | null;
   attempt_id: string | null;
   duplicate_of_id: string | null;
   source_message_id: string;
@@ -244,6 +252,8 @@ export interface OperationalSettingsTable {
   business_opens_hour: Generated<number>;
   business_closes_hour: Generated<number>;
   late_review_closes_hour: Generated<number>;
+  restaurant_latitude: number | null;
+  restaurant_longitude: number | null;
   updated_at: Timestamp;
 }
 

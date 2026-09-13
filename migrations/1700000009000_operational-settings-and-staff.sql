@@ -1,3 +1,4 @@
+-- Up Migration
 create table operational_settings (
   id                       boolean primary key default true check (id),  -- fila única
   rain_surcharge_enabled   boolean not null default false,
@@ -18,3 +19,7 @@ create table dashboard_users (
   is_active      boolean not null default true,
   created_at     timestamptz not null default now()
 );
+
+-- Down Migration
+drop table if exists dashboard_users;
+drop table if exists operational_settings;

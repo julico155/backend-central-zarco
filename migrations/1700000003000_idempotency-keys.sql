@@ -1,3 +1,4 @@
+-- Up Migration
 -- Idempotencia genérica de API (reemplaza el fingerprint atado a
 -- menu_sessions del diseño anterior). Patrón estándar tipo Stripe:
 -- INSERT ... ON CONFLICT sobre (api_client, endpoint, idempotency_key).
@@ -19,3 +20,6 @@ create table idempotency_keys (
   completed_at     timestamptz,
   constraint idempotency_keys_unique unique (api_client, endpoint, idempotency_key)
 );
+
+-- Down Migration
+drop table if exists idempotency_keys;

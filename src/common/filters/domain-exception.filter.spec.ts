@@ -30,7 +30,7 @@ describe('DomainExceptionFilter (invariante 8: nunca texto crudo, siempre {code,
     expect(response.json).toHaveBeenCalledWith({
       code: 'product_unavailable',
       message: expect.any(String),
-      details: { productId: 'prod-1', reason: 'sold_out' },
+      details: { productId: 'prod-1', reason: 'sold_out', unavailableProductIds: ['prod-1'] },
     });
   });
 

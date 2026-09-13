@@ -1,3 +1,4 @@
+-- Up Migration
 -- Avisos salientes: reemplaza order_notifications + telegram_alerts con una
 -- tabla única de "trabajos de aviso", mismo patrón claim->intentar->marcar.
 
@@ -27,3 +28,6 @@ create table notification_jobs (
 create index idx_notification_jobs_claimable
   on notification_jobs (next_attempt_at)
   where status in ('pending', 'failed');
+
+-- Down Migration
+drop table if exists notification_jobs;
