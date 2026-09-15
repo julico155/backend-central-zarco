@@ -1,7 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
-import { Database } from '../database/types';
+import { Database, LateOrderRequestStatus } from '../database/types';
 import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { OrdersService } from '../orders/orders.service';
@@ -52,6 +52,23 @@ export class LateOrderRequestsService {
       .executeTakeFirst();
     if (!row) throw new NotFoundDomainError('late_order_request', id);
     return toResponse(row);
+  }
+
+  /** Cola de solicitudes para el dashboard — por defecto solo las 'pending'. */
+  async findMany(filter: {
+    status?: LateOrderRequestStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<LateOrderRequestResponse[]> {
+    const rows = await this.db
+      .selectFrom('late_order_requests')
+      .selectAll()
+      .where('status', '=', filter.status ?? 'pending')
+      .orderBy('requested_at', 'asc')
+      .limit(Math.min(filter.limit ?? 50, 200))
+      .offset(filter.offset ?? 0)
+      .execute();
+    return rows.map(toResponse);
   }
 
   async accept(id: string, decidedBy: string): Promise<LateOrderRequestResponse> {

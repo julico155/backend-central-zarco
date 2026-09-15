@@ -122,11 +122,20 @@ export class OrdersService {
     return toOrderResponse(order, items);
   }
 
-  async findMany(filter: { customerId?: string; status?: OrderStatus }): Promise<OrderResponse[]> {
+  async findMany(filter: {
+    customerId?: string;
+    status?: OrderStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<OrderResponse[]> {
     let query = this.db.selectFrom('orders').selectAll();
     if (filter.customerId) query = query.where('customer_id', '=', filter.customerId);
     if (filter.status) query = query.where('status', '=', filter.status);
-    const orders = await query.orderBy('created_at', 'desc').execute();
+    const orders = await query
+      .orderBy('created_at', 'desc')
+      .limit(Math.min(filter.limit ?? 50, 200))
+      .offset(filter.offset ?? 0)
+      .execute();
     if (orders.length === 0) return [];
 
     const items = await this.db

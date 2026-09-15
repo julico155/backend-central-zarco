@@ -1,9 +1,17 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { NotFoundDomainError, ValidationError } from '../common/exceptions/domain-exception';
+import {
+  DomainException,
+  NotFoundDomainError,
+  ValidationError,
+} from '../common/exceptions/domain-exception';
 import { FindOrCreateCustomerDto } from './dto/find-or-create-customer.dto';
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
+}
 
 export interface CustomerResponse {
   id: string;
@@ -40,10 +48,11 @@ export class CustomersService {
    * mano: el gateway de WhatsApp llama con `phone`; el POS puede llamar sin
    * nada ("cliente genérico") o pedir el teléfono.
    *
-   * TODO: si llegan phone Y email y cada uno pertenece a un customer
-   * distinto ya existente, el INSERT puede violar el unique(email) aunque
-   * el ON CONFLICT solo cubra `phone` — decidir la regla de fusión antes de
-   * exponer este endpoint a un canal que mande ambos campos a la vez.
+   * Si llegan phone Y email y cada uno ya pertenece a un customer DISTINTO,
+   * el INSERT por phone (que no choca en phone) viola igual el unique(email)
+   * — ese caso no se fusiona automáticamente (fusionar identidades sin
+   * confirmación humana es más peligroso que rechazar), se traduce a un
+   * 409 de dominio en vez de dejar escapar el error crudo de Postgres.
    */
   async findOrCreate(dto: FindOrCreateCustomerDto): Promise<CustomerResponse> {
     if (!dto.phone && !dto.email && !dto.name) {
@@ -72,12 +81,26 @@ export class CustomersService {
     value: string,
     dto: FindOrCreateCustomerDto,
   ): Promise<CustomerResponse | null> {
-    const inserted = await this.db
-      .insertInto('customers')
-      .values({ name: dto.name, phone: dto.phone, email: dto.email })
-      .onConflict((oc) => oc.column(column).doNothing())
-      .returningAll()
-      .executeTakeFirst();
+    let inserted;
+    try {
+      inserted = await this.db
+        .insertInto('customers')
+        .values({ name: dto.name, phone: dto.phone, email: dto.email })
+        .onConflict((oc) => oc.column(column).doNothing())
+        .returningAll()
+        .executeTakeFirst();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const otherColumn = column === 'phone' ? 'email' : 'phone';
+        throw new DomainException(
+          'customer_identity_conflict',
+          HttpStatus.CONFLICT,
+          `El ${otherColumn} indicado ya pertenece a un cliente distinto del que tiene ese ${column}.`,
+          { conflictingColumn: otherColumn },
+        );
+      }
+      throw error;
+    }
 
     if (inserted) return toCustomerResponse(inserted);
 

@@ -1,7 +1,12 @@
 import { Kysely } from 'kysely';
 import { PaymentAttemptsService } from '../src/payment-attempts/payment-attempts.service';
+import { NotificationsOutService } from '../src/notifications-out/notifications-out.service';
 import { Database } from '../src/database/types';
 import { createTestDb, describeIfDb } from './utils/test-db';
+
+/** Los pedidos de este fixture no tienen customer_id, así que el aviso
+ * best-effort nunca se dispara — un stub basta. */
+const noopNotifications = { notifyNow: async () => undefined } as unknown as NotificationsOutService;
 
 /**
  * Invariantes 5 y 6 del plan:
@@ -21,7 +26,7 @@ describeIfDb('PaymentAttemptsService.decide (integración, concurrencia)', () =>
 
   beforeAll(() => {
     db = createTestDb();
-    service = new PaymentAttemptsService(db);
+    service = new PaymentAttemptsService(db, noopNotifications);
   });
 
   afterAll(async () => {

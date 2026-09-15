@@ -3,9 +3,14 @@ export interface Coordinates {
   longitude: number;
 }
 
+export interface DistanceResult {
+  meters: number;
+  source: 'straight_line' | 'mapbox';
+}
+
 export interface DistanceService {
-  /** Distancia en metros entera (redondeada), en línea recta o por calle según la implementación. */
-  metersBetween(from: Coordinates, to: Coordinates): number;
+  /** Distancia en metros, en línea recta o por calle según la implementación. */
+  metersBetween(from: Coordinates, to: Coordinates): Promise<DistanceResult>;
 }
 
 export const DISTANCE_SERVICE = Symbol('DISTANCE_SERVICE');
@@ -17,13 +22,12 @@ function toRadians(degrees: number): number {
 }
 
 /**
- * MVP sin Mapbox: distancia en línea recta (haversine). Subestima la
- * distancia real de calle — swap a un proveedor de ruteo real es cuestión de
- * implementar esta misma interfaz e inyectarla en DeliveryModule, sin tocar
- * la lógica de tarifas/CAS que consume DistanceService.
+ * Fallback sin Mapbox (y red de seguridad de MapboxDistanceService si la API
+ * falla): distancia en línea recta (haversine). Subestima la distancia real
+ * de calle.
  */
 export class HaversineDistanceService implements DistanceService {
-  metersBetween(from: Coordinates, to: Coordinates): number {
+  async metersBetween(from: Coordinates, to: Coordinates): Promise<DistanceResult> {
     const dLat = toRadians(to.latitude - from.latitude);
     const dLon = toRadians(to.longitude - from.longitude);
     const lat1 = toRadians(from.latitude);
@@ -32,6 +36,6 @@ export class HaversineDistanceService implements DistanceService {
     const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return Math.round(EARTH_RADIUS_METERS * c);
+    return { meters: Math.round(EARTH_RADIUS_METERS * c), source: 'straight_line' };
   }
 }

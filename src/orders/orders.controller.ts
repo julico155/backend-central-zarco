@@ -33,8 +33,18 @@ export class OrdersController {
   }
 
   @Get('orders')
-  findMany(@Query('customer_id') customerId?: string, @Query('status') status?: OrderStatus) {
-    return this.orders.findMany({ customerId, status });
+  findMany(
+    @Query('customer_id') customerId?: string,
+    @Query('status') status?: OrderStatus,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.orders.findMany({
+      customerId,
+      status,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
   }
 
   @Post('orders')

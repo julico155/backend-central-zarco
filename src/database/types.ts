@@ -207,6 +207,7 @@ export interface PaymentProofsTable {
   analysis_verdict: PaymentProofAnalysisVerdict | null;
   analysis_reasons: string[] | null;
   analysis_amount_label: string | null;
+  candidate_count: number | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

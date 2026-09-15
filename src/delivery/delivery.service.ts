@@ -61,7 +61,7 @@ export class DeliveryService {
 
     const settings = await this.operationalSettings.getRow();
     const origin = this.requireRestaurantOrigin(settings);
-    const meters = this.distance.metersBetween(origin, {
+    const { meters, source } = await this.distance.metersBetween(origin, {
       latitude: dto.latitude,
       longitude: dto.longitude,
     });
@@ -74,7 +74,7 @@ export class DeliveryService {
           longitude: dto.longitude,
           status: 'quoted' as const,
           distance_meters: meters,
-          distance_source: 'straight_line' as const,
+          distance_source: source,
           fee_amount: fee.amount.toFixed(2),
           error_code: null,
         }
@@ -85,7 +85,7 @@ export class DeliveryService {
           status: (fee.reason === 'manual_quote' ? 'manual_quote' : 'failed') as
             'manual_quote' | 'failed',
           distance_meters: fee.reason === 'manual_quote' ? meters : null,
-          distance_source: fee.reason === 'manual_quote' ? ('straight_line' as const) : null,
+          distance_source: fee.reason === 'manual_quote' ? source : null,
           fee_amount: null,
           error_code: fee.reason,
         };
@@ -164,7 +164,7 @@ export class DeliveryService {
 
       const settings = await this.operationalSettings.getRow();
       const origin = this.requireRestaurantOrigin(settings);
-      const meters = this.distance.metersBetween(origin, {
+      const { meters } = await this.distance.metersBetween(origin, {
         latitude: order.delivery_latitude,
         longitude: order.delivery_longitude,
       });

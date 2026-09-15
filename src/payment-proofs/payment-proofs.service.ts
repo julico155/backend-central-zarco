@@ -27,6 +27,7 @@ export interface PaymentProofResponse {
   matchMethod: string;
   routingException: string | null;
   captureStatus: string;
+  candidateCount: number | null;
   createdAt: string;
 }
 
@@ -38,6 +39,7 @@ type PaymentProofRow = {
   match_method: string;
   routing_exception: string | null;
   capture_status: string;
+  candidate_count: number | null;
   created_at: Date | string;
 };
 
@@ -322,6 +324,7 @@ export class PaymentProofsService {
             byte_size: byteSize,
             sha256_hex: sha256Hex,
             capture_status: 'capturing',
+            candidate_count: association.candidateCount,
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -418,6 +421,7 @@ function toResponse(row: PaymentProofRow): PaymentProofResponse {
     matchMethod: row.match_method,
     routingException: row.routing_exception,
     captureStatus: row.capture_status,
+    candidateCount: row.candidate_count,
     createdAt: new Date(row.created_at).toISOString(),
   };
 }

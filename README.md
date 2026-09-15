@@ -28,11 +28,21 @@ npm run start:dev
   `api_client`, comparación timing-safe), `IdempotencyService` genérico
   (header `Idempotency-Key`), excepciones/filtro de dominio (`{code,
   message, details}`, nunca texto crudo de Postgres).
+- `src/auth/` — login JWT (`dashboard_users`, bcrypt) para sesión de staff,
+  `JwtAuthGuard` + `RolesGuard` + `@Roles(...)` para RBAC. Dos capas de auth
+  conviven pero nunca comparten el mismo header: `ServiceAuthGuard` (bearer
+  estático) autentica de qué sistema viene la llamada (whatsapp-gateway,
+  pos, web); `JwtAuthGuard` autentica qué persona de staff la hizo. Los
+  endpoints de solo-lectura y los que llaman los propios sistemas usan
+  `ServiceAuthGuard`; los de escritura que son decisiones humanas
+  (mantenimiento de menú, aceptar/rechazar pedidos tardíos, etc.) usan JWT.
 - `src/gateway-client/` — cliente HTTP hacia el "gateway API" que expondrá
   `saas_smarky` (`/gateway/whatsapp/messages`, `/gateway/whatsapp/
   location-requests`, `/gateway/telegram/alerts`).
 - `src/notifications-out/` — tabla única de trabajos de aviso
-  (`notification_jobs`), camino rápido de envío inmediato.
+  (`notification_jobs`): camino rápido de envío inmediato +
+  `NotificationRecoveryCron` (cada minuto) que reintenta con backoff
+  exponencial lo que quedó `pending`/`failed`.
 - Un módulo por dominio de negocio (`categories`, `products`, `customers`,
   `promotions`, `operational-settings`, `orders`, `delivery`,
   `payment-attempts`, `payment-proofs`, `late-order-requests`, `auth`).
@@ -42,11 +52,13 @@ npm run start:dev
 Todo lo siguiente está implementado, probado con tests unitarios/integración
 y verificado manualmente de punta a punta contra un proyecto Supabase de
 prueba (categorías → productos → cliente → pedido → delivery → comprobante
-→ decisión de pago), incluyendo el gateway de WhatsApp/Telegram simulado:
+→ decisión de pago → aviso), incluyendo el gateway de WhatsApp/Telegram
+simulado:
 
 - **`categories`, `products`, `customers`, `promotions`** (CRUD completo,
   `status` calculado), **`operational-settings`** (horario, recargo por
-  lluvia, coordenadas del restaurante).
+  lluvia, coordenadas del restaurante). Escritura protegida por JWT +
+  `@Roles('admin')` (disponibilidad de producto también admite `kitchen`).
 - **`orders`** — `POST /orders` porta `create_order_web_v5` (saas_smarky)
   completo: gate de horario (17-22 abierto, 22-23 revisión nocturna, cierre
   a las 23, hora de La Paz), `Idempotency-Key` genérica reemplazando
@@ -54,50 +66,56 @@ prueba (categorías → productos → cliente → pedido → delivery → compro
   snapshot de productos y combos, `product_unavailable` vs
   `promotion_unavailable`. Más `location` (dispara cotización de delivery),
   `kitchen-note`, `switch-to-pickup`, `cash/confirm`/`cash/cancel` (CAS),
-  `PATCH /status` (transición legal + CAS optimista).
+  `PATCH /status` (transición legal + CAS optimista), `GET /orders` con
+  filtros + paginación (`limit`/`offset`).
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
   (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
-  congelado en la misma transacción). Distancia por ahora en línea recta
-  (`DistanceService` intercambiable — falta conectar Mapbox u otro proveedor
-  de ruteo real).
-- **`late-order-requests`** — `accept` revalida el carrito completo
-  reusando `OrdersService.createOrderInTransaction` (con `SAVEPOINT` propio)
-  y solo entonces marca `accepted` con su `order_id`; fallos permanentes
-  quedan `rejected` con motivo, nunca en bucle.
+  congelado en la misma transacción). Distancia vía `DistanceService`
+  intercambiable: `MapboxDistanceService` (Directions API, perfil driving)
+  ya implementado y se activa solo con `MAPBOX_ACCESS_TOKEN` en `.env`; sin
+  token (o si la API falla/tarda más de 4s) usa línea recta (`Haversine`)
+  automáticamente — el `distance_source` persistido siempre refleja cuál se
+  usó de verdad.
+- **`late-order-requests`** — `accept`/`reject` requieren JWT + rol `admin`
+  o `cashier` (`decidedBy` es el username del staff autenticado, no un
+  api_client de servicio). `accept` revalida el carrito completo reusando
+  `OrdersService.createOrderInTransaction` (con `SAVEPOINT` propio) y solo
+  entonces marca `accepted` con su `order_id`; fallos permanentes quedan
+  `rejected` con motivo, nunca en bucle. `GET /late-order-requests` lista
+  la cola (`pending` por defecto) para el dashboard.
 - **`payment-attempts`** — CAS puro `pending_review → accepted|rejected`
-  con el índice único parcial como garantía de esquema.
+  con el índice único parcial como garantía de esquema. Cuando el CAS lo
+  gana ESTA llamada (`won: true`), en la misma transacción propaga a
+  `orders.payment_status` (`paid`/`rejected`) y dispara un aviso best-effort
+  al cliente — nunca si `won: false`, para no duplicar el efecto.
 - **`payment-proofs`** — intake completo: idempotencia por
   `source_message_id`, algoritmo de asociación `resolveAssociation` portado
   de saas_smarky (niveles reply_to_qr / candidatos estructurales / ventanas
-  de 4h-24h), routing bajo `pg_advisory_xact_lock` por cliente con
-  `SAVEPOINT`s replicando las subtransacciones del RPC original, y un
-  adaptador de storage intercambiable (`PaymentProofStorage`) — hoy en
-  disco local, listo para swap a S3/R2 con credenciales reales.
-- **`auth`** — login JWT contra `dashboard_users` (bcrypt), guard +
-  decorador de roles (`@Roles(...)`) listos para usar.
+  de 4h-24h, con `candidate_count` persistido para auditoría), routing bajo
+  `pg_advisory_xact_lock` por cliente con `SAVEPOINT`s replicando las
+  subtransacciones del RPC original, y un adaptador de storage
+  intercambiable (`PaymentProofStorage`) — hoy en disco local (decisión
+  deliberada por ahora), listo para swap a S3/R2 con credenciales reales.
+- **`auth`** — login JWT contra `dashboard_users` (bcrypt). Alta de staff
+  vía API (`POST /auth/users`, `GET /auth/users`, `PATCH
+  /auth/users/:id/active`), protegida con `@Roles('admin')` — el primer
+  admin se sigue creando por SQL directo (arranque en frío inevitable).
+- **`customers.findOrCreate`** — si `phone` y `email` llegan juntos y cada
+  uno ya pertenece a un cliente distinto, se traduce a un 409
+  (`customer_identity_conflict`) en vez de dejar escapar el unique
+  violation crudo de Postgres.
 
 ## Qué falta / deuda conocida
 
-- **Mapbox real**: `DeliveryService` usa distancia en línea recta
-  (haversine) — subestima la distancia de calle. Cambiar
-  `HaversineDistanceService` por un adaptador Mapbox real en
-  `delivery.module.ts`.
 - **S3/R2 real**: `PaymentProofsModule` usa `LocalDiskPaymentProofStorage`
-  — cambiar el provider por un adaptador S3/R2 cuando haya credenciales.
-- **RBAC**: varios endpoints de staff (`categories`/`products`/
-  `promotions` POST/PATCH, `operational-settings` PATCH, `late-order-
-  requests` accept/reject) solo exigen el bearer de servicio, no un rol
-  específico vía JWT — quedan marcados `TODO(auth)` en el código. El guard
-  y el decorador de roles (`JwtAuthGuard` + `RolesGuard` + `@Roles()`) ya
-  existen en `src/auth/`, falta aplicarlos.
-- **Pago con QR bancario**: el plan menciona una integración próxima con
-  una API de banco. Hoy `payment_method: 'qr'` asume comprobante manual
-  (foto) vía WhatsApp; cuando llegue la integración bancaria, probablemente
-  cree `payment_attempts`/decisiones de forma automática en vez de por
-  `payment-proofs` — diseñar esa entrada sin romper el CAS existente.
-- **Job de recuperación de `notification_jobs`**: el camino rápido
-  (envío inmediato) está implementado; el cron de reintento con backoff
-  sobre `status in ('pending','failed')` no.
-- El `candidate_count` del algoritmo de asociación de `payment-proofs` no
-  se persiste en BD (a diferencia del original) — es una simplificación
-  deliberada, ver comentario en `payment-proofs.service.ts`.
+  por decisión explícita (disco local está bien por ahora) — cambiar el
+  provider por un adaptador S3/R2 cuando haya credenciales, mismo patrón
+  swap que `DistanceService`.
+- **Pago con QR bancario**: pendiente a propósito (dependencia externa aún
+  no definida). El plan menciona una integración próxima con una API de
+  banco. Hoy `payment_method: 'qr'` asume comprobante manual (foto) vía
+  WhatsApp; cuando llegue la integración bancaria, probablemente cree
+  `payment_attempts`/decisiones de forma automática en vez de por
+  `payment-proofs` — diseñar esa entrada sin romper el CAS existente (el
+  efecto downstream en `payment-attempts.decide()` ya está listo para
+  reutilizarse desde ahí).

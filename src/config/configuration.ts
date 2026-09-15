@@ -15,6 +15,10 @@ export interface AppConfig {
     secret: string;
     expiresIn: string;
   };
+  mapbox: {
+    /** Vacío = sin credenciales todavía, DeliveryModule usa haversine (línea recta). */
+    accessToken: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -44,5 +48,8 @@ export default (): AppConfig => ({
   jwt: {
     secret: process.env.JWT_SECRET ?? '',
     expiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
+  },
+  mapbox: {
+    accessToken: process.env.MAPBOX_ACCESS_TOKEN ?? '',
   },
 });
