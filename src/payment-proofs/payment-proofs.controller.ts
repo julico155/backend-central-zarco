@@ -9,6 +9,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
 import { PaymentProofsService } from './payment-proofs.service';
@@ -22,6 +23,9 @@ export class PaymentProofsController {
   constructor(private readonly paymentProofs: PaymentProofsService) {}
 
   @Get()
+  @ApiQuery({ name: 'routing_exception', required: false, type: String })
+  @ApiQuery({ name: 'match_method', required: false, type: String })
+  @ApiQuery({ name: 'order_id', required: false, type: String })
   find(
     @Query('routing_exception') routingException?: PaymentProofRoutingException,
     @Query('match_method') matchMethod?: string,

@@ -6,6 +6,8 @@ export interface ServiceAuthConfig {
 export interface AppConfig {
   port: number;
   databaseUrl: string;
+  /** Orígenes permitidos por CORS. Vacío = ninguno (el backend queda solo para clientes que no son navegadores). */
+  corsOrigins: string[];
   serviceAuth: ServiceAuthConfig;
   gateway: {
     baseUrl: string;
@@ -44,9 +46,18 @@ function parseServiceAuthTokens(raw: string | undefined): Record<string, string>
   return Object.fromEntries(entries);
 }
 
+function parseCorsOrigins(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
 export default (): AppConfig => ({
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: process.env.DATABASE_URL ?? '',
+  corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   serviceAuth: {
     tokens: parseServiceAuthTokens(process.env.SERVICE_AUTH_TOKENS),
   },

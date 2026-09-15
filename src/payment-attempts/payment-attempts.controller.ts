@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
+import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -11,7 +12,7 @@ export class PaymentAttemptsController {
   constructor(private readonly paymentAttempts: PaymentAttemptsService) {}
 
   @Get('orders/:id/payment-attempts')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   findByOrder(@Param('id', ParseUUIDPipe) id: string) {
     return this.paymentAttempts.findByOrder(id);
   }

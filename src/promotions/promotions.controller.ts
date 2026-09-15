@@ -8,7 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
+import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -23,13 +23,13 @@ export class PromotionsController {
   constructor(private readonly promotions: PromotionsService) {}
 
   @Get()
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   findAll() {
     return this.promotions.findAll();
   }
 
   @Get(':id')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.promotions.findOne(id);
   }

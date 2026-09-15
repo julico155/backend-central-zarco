@@ -8,12 +8,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
+import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentStaffUser } from '../auth/current-staff-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
+import { ApiQuery } from '@nestjs/swagger';
 import { LateOrderRequestStatus } from '../database/types';
 import { LateOrderRequestsService } from './late-order-requests.service';
 import { RejectLateOrderRequestDto } from './dto/reject-late-order-request.dto';
@@ -24,7 +25,10 @@ export class LateOrderRequestsController {
 
   /** Cola para el dashboard — por defecto solo 'pending'. */
   @Get()
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
   findMany(
     @Query('status') status?: LateOrderRequestStatus,
     @Query('limit') limit?: string,
@@ -38,7 +42,7 @@ export class LateOrderRequestsController {
   }
 
   @Get(':id')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   findById(@Param('id', ParseUUIDPipe) id: string) {
     return this.lateOrderRequests.findById(id);
   }

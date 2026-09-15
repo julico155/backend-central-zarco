@@ -6,6 +6,7 @@ import {
   OrderChannel,
   OrderDeliveryType,
   OrderPaymentMethod,
+  OrderPromotionComponentSnapshot,
   OrderStatus,
 } from '../database/types';
 import {
@@ -33,6 +34,15 @@ export interface OrderItemResponse {
   subtotal: number;
 }
 
+export interface OrderPromotionResponse {
+  promotionId: string | null;
+  promotionNameSnapshot: string;
+  promoPriceSnapshot: number;
+  comboQuantity: number;
+  subtotal: number;
+  componentsSnapshot: OrderPromotionComponentSnapshot[];
+}
+
 export interface OrderResponse {
   id: string;
   orderNumber: string;
@@ -54,6 +64,8 @@ export interface OrderResponse {
   statusUpdatedBy: string | null;
   createdAt: string;
   items: OrderItemResponse[];
+  /** Combos vendidos. `items` solo trae los productos sueltos, así que sin esto el ticket y el tablero de cocina quedan incompletos. */
+  promotions: OrderPromotionResponse[];
 }
 
 export interface LateOrderRequestAcceptedResponse {
@@ -115,12 +127,8 @@ export class OrdersService {
       .where('id', '=', id)
       .executeTakeFirst();
     if (!order) throw new NotFoundDomainError('order', id);
-    const items = await this.db
-      .selectFrom('order_items')
-      .selectAll()
-      .where('order_id', '=', id)
-      .execute();
-    return toOrderResponse(order, items);
+    const { items, promotions } = await loadOrderLines(this.db, id);
+    return toOrderResponse(order, items, promotions);
   }
 
   async findMany(filter: {
@@ -139,23 +147,27 @@ export class OrdersService {
       .execute();
     if (orders.length === 0) return [];
 
+    const orderIds = orders.map((o) => o.id);
     const items = await this.db
       .selectFrom('order_items')
       .selectAll()
-      .where(
-        'order_id',
-        'in',
-        orders.map((o) => o.id),
-      )
+      .where('order_id', 'in', orderIds)
+      .execute();
+    const promotions = await this.db
+      .selectFrom('order_promotions')
+      .selectAll()
+      .where('order_id', 'in', orderIds)
       .execute();
 
-    const itemsByOrder = new Map<string, typeof items>();
-    for (const item of items) {
-      const list = itemsByOrder.get(item.order_id) ?? [];
-      list.push(item);
-      itemsByOrder.set(item.order_id, list);
-    }
-    return orders.map((order) => toOrderResponse(order, itemsByOrder.get(order.id) ?? []));
+    const itemsByOrder = groupByOrderId(items);
+    const promotionsByOrder = groupByOrderId(promotions);
+    return orders.map((order) =>
+      toOrderResponse(
+        order,
+        itemsByOrder.get(order.id) ?? [],
+        promotionsByOrder.get(order.id) ?? [],
+      ),
+    );
   }
 
   /**
@@ -517,13 +529,12 @@ export class OrdersService {
         .execute();
     }
 
-    const insertedItems = await trx
-      .selectFrom('order_items')
-      .selectAll()
-      .where('order_id', '=', orderRow.id)
-      .execute();
+    const { items: insertedItems, promotions: insertedPromotions } = await loadOrderLines(
+      trx,
+      orderRow.id,
+    );
 
-    return toOrderResponse(orderRow, insertedItems);
+    return toOrderResponse(orderRow, insertedItems, insertedPromotions);
   }
 
   /**
@@ -714,12 +725,8 @@ export class OrdersService {
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    const items = await this.db
-      .selectFrom('order_items')
-      .selectAll()
-      .where('order_id', '=', orderId)
-      .execute();
-    return toOrderResponse(updated, items);
+    const { items, promotions } = await loadOrderLines(this.db, orderId);
+    return toOrderResponse(updated, items, promotions);
   }
 
   async switchToPickup(orderId: string): Promise<OrderResponse> {
@@ -763,12 +770,8 @@ export class OrdersService {
         .returningAll()
         .executeTakeFirstOrThrow();
 
-      const items = await trx
-        .selectFrom('order_items')
-        .selectAll()
-        .where('order_id', '=', orderId)
-        .execute();
-      return toOrderResponse(updated, items);
+      const { items, promotions } = await loadOrderLines(trx, orderId);
+      return toOrderResponse(updated, items, promotions);
     });
   }
 
@@ -788,12 +791,8 @@ export class OrdersService {
 
     if (!updated) {
       const existing = await this.findExistingCashOrder(orderId);
-      const items = await this.db
-        .selectFrom('order_items')
-        .selectAll()
-        .where('order_id', '=', existing.id)
-        .execute();
-      return toOrderResponse(existing, items);
+      const { items, promotions } = await loadOrderLines(this.db, existing.id);
+      return toOrderResponse(existing, items, promotions);
     }
 
     try {
@@ -825,12 +824,8 @@ export class OrdersService {
       );
     }
 
-    const items = await this.db
-      .selectFrom('order_items')
-      .selectAll()
-      .where('order_id', '=', updated.id)
-      .execute();
-    return toOrderResponse(updated, items);
+    const { items, promotions } = await loadOrderLines(this.db, updated.id);
+    return toOrderResponse(updated, items, promotions);
   }
 
   async cancelCash(orderId: string): Promise<OrderResponse> {
@@ -844,12 +839,8 @@ export class OrdersService {
       .executeTakeFirst();
 
     const order = updated ?? (await this.findExistingCashOrder(orderId));
-    const items = await this.db
-      .selectFrom('order_items')
-      .selectAll()
-      .where('order_id', '=', order.id)
-      .execute();
-    return toOrderResponse(order, items);
+    const { items, promotions } = await loadOrderLines(this.db, order.id);
+    return toOrderResponse(order, items, promotions);
   }
 
   private async findExistingCashOrder(orderId: string) {
@@ -903,12 +894,8 @@ export class OrdersService {
       );
     }
 
-    const items = await this.db
-      .selectFrom('order_items')
-      .selectAll()
-      .where('order_id', '=', orderId)
-      .execute();
-    return toOrderResponse(updated, items);
+    const { items, promotions } = await loadOrderLines(this.db, orderId);
+    return toOrderResponse(updated, items, promotions);
   }
 }
 
@@ -925,6 +912,31 @@ function toLateOrderRequestAcceptedResponse(row: {
     subtotalAmount: Number(row.subtotal_amount),
     expiresAt: new Date(row.expires_at).toISOString(),
   };
+}
+
+function groupByOrderId<T extends { order_id: string }>(rows: T[]): Map<string, T[]> {
+  const byOrder = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = byOrder.get(row.order_id) ?? [];
+    list.push(row);
+    byOrder.set(row.order_id, list);
+  }
+  return byOrder;
+}
+
+/** Transaction<Database> extiende Kysely<Database>, así que sirve dentro y fuera de una transacción. */
+async function loadOrderLines(db: Kysely<Database>, orderId: string) {
+  const items = await db
+    .selectFrom('order_items')
+    .selectAll()
+    .where('order_id', '=', orderId)
+    .execute();
+  const promotions = await db
+    .selectFrom('order_promotions')
+    .selectAll()
+    .where('order_id', '=', orderId)
+    .execute();
+  return { items, promotions };
 }
 
 function toOrderResponse(
@@ -957,6 +969,14 @@ function toOrderResponse(
     quantity: number;
     subtotal: string;
   }[],
+  promotions: {
+    promotion_id: string | null;
+    promotion_name_snapshot: string;
+    promo_price_snapshot: string;
+    combo_quantity: number;
+    subtotal: string;
+    components_snapshot: OrderPromotionComponentSnapshot[];
+  }[],
 ): OrderResponse {
   return {
     id: order.id,
@@ -987,6 +1007,14 @@ function toOrderResponse(
       unitPriceSnapshot: Number(item.unit_price_snapshot),
       quantity: item.quantity,
       subtotal: Number(item.subtotal),
+    })),
+    promotions: promotions.map((promotion) => ({
+      promotionId: promotion.promotion_id,
+      promotionNameSnapshot: promotion.promotion_name_snapshot,
+      promoPriceSnapshot: Number(promotion.promo_price_snapshot),
+      comboQuantity: promotion.combo_quantity,
+      subtotal: Number(promotion.subtotal),
+      componentsSnapshot: promotion.components_snapshot,
     })),
   };
 }

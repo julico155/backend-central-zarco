@@ -1,10 +1,14 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { NotFoundDomainError } from '../common/exceptions/domain-exception';
+import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
+}
 
 export interface ProductResponse {
   id: string;
@@ -33,20 +37,31 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto): Promise<ProductResponse> {
-    const row = await this.db
-      .insertInto('products')
-      .values({
-        code: dto.code,
-        name: dto.name,
-        category_id: dto.categoryId,
-        price: dto.price.toFixed(2),
-        is_active: dto.isActive,
-        is_available: dto.isAvailable,
-        sort_order: dto.sortOrder,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    return toProductResponse(row);
+    try {
+      const row = await this.db
+        .insertInto('products')
+        .values({
+          code: dto.code,
+          name: dto.name,
+          category_id: dto.categoryId,
+          price: dto.price.toFixed(2),
+          is_active: dto.isActive,
+          is_available: dto.isAvailable,
+          sort_order: dto.sortOrder,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return toProductResponse(row);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new DomainException(
+          'product_code_taken',
+          HttpStatus.CONFLICT,
+          `Ya existe un producto con el código "${dto.code}".`,
+        );
+      }
+      throw error;
+    }
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<ProductResponse> {

@@ -236,6 +236,15 @@ export interface PromotionItemsTable {
   quantity: number;
 }
 
+/** Componentes del combo congelados al momento de la venta, no un join en vivo con products. */
+export interface OrderPromotionComponentSnapshot {
+  productId: string;
+  code: string;
+  name: string;
+  unitPrice: number;
+  quantity: number;
+}
+
 export interface OrderPromotionsTable {
   id: Generated<string>;
   order_id: string;
@@ -244,7 +253,7 @@ export interface OrderPromotionsTable {
   promo_price_snapshot: string;
   combo_quantity: number;
   subtotal: string;
-  components_snapshot: JSONColumnType<unknown[]>;
+  components_snapshot: JSONColumnType<OrderPromotionComponentSnapshot[]>;
 }
 
 export interface OperationalSettingsTable {

@@ -11,8 +11,10 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
+import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { IdempotencyKey } from '../common/decorators/idempotency-key.decorator';
 import { ApiClient } from '../common/decorators/api-client.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -32,7 +34,7 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Get('orders/:id')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   findById(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.findById(id);
   }
@@ -42,6 +44,10 @@ export class OrdersController {
   @Get('orders')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('kitchen', 'admin')
+  @ApiQuery({ name: 'customer_id', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
   findMany(
     @Query('customer_id') customerId?: string,
     @Query('status') status?: OrderStatus,
@@ -57,7 +63,7 @@ export class OrdersController {
   }
 
   @Post('orders')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   async create(
     @Body() dto: CreateOrderDto,
     @IdempotencyKey() idempotencyKey: string,
@@ -83,7 +89,7 @@ export class OrdersController {
   }
 
   @Post('orders/:id/kitchen-note')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   addKitchenNote(@Param('id', ParseUUIDPipe) id: string, @Body() dto: KitchenNoteDto) {
     return this.orders.addKitchenNote(id, dto.note);
   }
@@ -95,13 +101,13 @@ export class OrdersController {
   }
 
   @Post('orders/:id/cash/confirm')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   confirmCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.confirmCash(id);
   }
 
   @Post('orders/:id/cash/cancel')
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   cancelCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.cancelCash(id);
   }

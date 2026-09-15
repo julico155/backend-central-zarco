@@ -17,6 +17,12 @@ export class RolesGuard implements CanActivate {
     if (!requiredRoles || requiredRoles.length === 0) return true;
 
     const request = context.switchToHttp().getRequest<StaffRequest>();
+
+    // Sin staffUser la request se autenticó con el bearer estático entre
+    // servicios (ServiceOrStaffAuthGuard): no tiene rol, y ese token ya es
+    // confianza total entre backends.
+    if (!request.staffUser) return true;
+
     if (!requiredRoles.includes(request.staffUser.role)) {
       throw new ForbiddenException(`Requiere rol: ${requiredRoles.join(' o ')}.`);
     }

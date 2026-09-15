@@ -18,7 +18,8 @@
     "migrate": "node-pg-migrate --migration-file-language sql -m migrations",
     "migrate:up": "node-pg-migrate up --migration-file-language sql -m migrations",
     "migrate:down": "node-pg-migrate down --migration-file-language sql -m migrations",
-    "migrate:create": "node-pg-migrate create --migration-file-language sql -m migrations"
+    "migrate:create": "node-pg-migrate create --migration-file-language sql -m migrations",
+    "create-admin": "ts-node scripts/create-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1132.0",
@@ -28,6 +29,7 @@
     "@nestjs/jwt": "11.0.2",
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/schedule": "^4.1.2",
+    "@nestjs/swagger": "^8.1.1",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",

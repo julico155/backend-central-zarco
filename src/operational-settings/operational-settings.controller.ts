@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
-import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
+import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -11,7 +11,7 @@ export class OperationalSettingsController {
   constructor(private readonly settings: OperationalSettingsService) {}
 
   @Get()
-  @UseGuards(ServiceAuthGuard)
+  @UseGuards(ServiceOrStaffAuthGuard)
   get() {
     return this.settings.get();
   }

@@ -11,8 +11,31 @@ cp .env.example .env   # completar DATABASE_URL (Postgres propio, credenciales
                         # propias — nunca la service_role de Supabase) y los
                         # demás valores
 npm run migrate:up     # aplica migrations/ contra DATABASE_URL
+
+# Primer usuario de staff. POST /auth/users exige un admin ya logueado, así
+# que el arranque en frío va por acá (la contraseña sale de ADMIN_PASSWORD
+# para no dejarla en el historial del shell).
+ADMIN_PASSWORD='...' npm run create-admin -- <username> admin
+
 npm run start:dev
 ```
+
+`CORS_ORIGINS` tiene que incluir el origen de cualquier front en el navegador
+(POS, dashboard) o el preflight falla; los clientes que no son navegadores no
+lo necesitan. En desarrollo, `http://localhost:5173`.
+
+## Contrato de la API
+
+`/docs` (Swagger UI) y `/docs-json` (OpenAPI) se generan solos desde los tipos
+de TypeScript, vía el CLI plugin de `@nestjs/swagger` declarado en
+`nest-cli.json`. El front genera sus tipos de request desde `/docs-json` con
+`openapi-typescript` en vez de mantenerlos a mano.
+
+**Limitación actual**: los tipos de *response* (`OrderResponse`,
+`ProductResponse`, etc.) son `interface`s de TypeScript, que no existen en
+runtime — el plugin no puede generar su schema y salen como `object` vacío en
+el OpenAPI. Para que el front también genere las respuestas habría que
+convertirlas en `class` con `@ApiProperty()`.
 
 ## Estructura
 
@@ -30,12 +53,21 @@ npm run start:dev
   message, details}`, nunca texto crudo de Postgres).
 - `src/auth/` — login JWT (`dashboard_users`, bcrypt) para sesión de staff,
   `JwtAuthGuard` + `RolesGuard` + `@Roles(...)` para RBAC. Dos capas de auth
-  conviven pero nunca comparten el mismo header: `ServiceAuthGuard` (bearer
-  estático) autentica de qué sistema viene la llamada (whatsapp-gateway,
-  pos, web); `JwtAuthGuard` autentica qué persona de staff la hizo. Los
-  endpoints de solo-lectura y los que llaman los propios sistemas usan
-  `ServiceAuthGuard`; los de escritura que son decisiones humanas
-  (mantenimiento de menú, aceptar/rechazar pedidos tardíos, etc.) usan JWT.
+  conviven sobre el mismo header `Authorization: Bearer`:
+  `ServiceAuthGuard` (bearer estático, tokens de `SERVICE_AUTH_TOKENS`)
+  autentica de qué sistema viene la llamada (whatsapp-gateway, pos, web);
+  `JwtAuthGuard` autentica qué persona de staff la hizo. Tres casos:
+  - **Solo servicio** — lo que solo llama el gateway de WhatsApp
+    (`/delivery`, `/payment-proofs`, `location`, `switch-to-pickup`).
+  - **Solo JWT** — decisiones humanas con rol (mantenimiento de menú,
+    tablero de cocina, aceptar/rechazar pedidos tardíos, cobro QR presencial).
+  - **Cualquiera de los dos** (`ServiceOrStaffAuthGuard`) — lo que llaman
+    tanto el gateway como el POS: catálogo, `POST /orders`, `GET /orders/:id`,
+    cobro en efectivo, clientes. Existe para que el POS en el navegador use
+    solo la sesión del cajero y no tenga que embeber un token de servicio,
+    que no vence, en el bundle. Una request autenticada por JWT queda marcada
+    con `apiClient = 'pos'`, que es el scope de idempotencia de
+    `POST /orders`.
 - `src/gateway-client/` — cliente HTTP hacia el "gateway API" que expondrá
   `saas_smarky` (`/gateway/whatsapp/messages`, `/gateway/whatsapp/
   location-requests`, `/gateway/telegram/alerts`).

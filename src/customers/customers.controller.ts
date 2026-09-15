@@ -8,13 +8,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
+import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { NotFoundDomainError, ValidationError } from '../common/exceptions/domain-exception';
 import { CustomersService } from './customers.service';
 import { FindOrCreateCustomerDto } from './dto/find-or-create-customer.dto';
 
 @Controller('customers')
-@UseGuards(ServiceAuthGuard)
+@UseGuards(ServiceOrStaffAuthGuard)
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 

@@ -17,13 +17,15 @@ export interface CategoryResponse {
 export class CategoriesService {
   constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
 
-  async findActive(): Promise<CategoryResponse[]> {
-    const rows = await this.db
-      .selectFrom('categories')
-      .selectAll()
-      .where('is_active', '=', true)
-      .orderBy('sort_order', 'asc')
-      .execute();
+  /**
+   * Por defecto solo las activas (es lo que consume el catálogo). El
+   * mantenimiento de menú necesita `includeInactive`: sin eso, desactivar una
+   * categoría la vuelve irrecuperable desde la UI.
+   */
+  async findMany(includeInactive = false): Promise<CategoryResponse[]> {
+    let query = this.db.selectFrom('categories').selectAll();
+    if (!includeInactive) query = query.where('is_active', '=', true);
+    const rows = await query.orderBy('sort_order', 'asc').execute();
     return rows.map(toCategoryResponse);
   }
 

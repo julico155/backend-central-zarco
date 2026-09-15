@@ -283,7 +283,10 @@ export function computeStatus(promotion: PromotionRow, items: PromotionItemRow[]
   if (promotion.archived_at) return 'archivada';
   if (!promotion.is_active) return 'inactiva';
   if (promotion.starts_at && new Date(promotion.starts_at) > now) return 'programada';
-  if (promotion.ends_at && new Date(promotion.ends_at) < now) return 'expirada';
+  // <= y no <: mismo corte que la revalidación del checkout (orders.service.ts),
+  // si no en el instante exacto de ends_at la promo se muestra activa y el
+  // checkout la rechaza.
+  if (promotion.ends_at && new Date(promotion.ends_at) <= now) return 'expirada';
   if (items.some((item) => !item.product_is_active || !item.product_is_available)) return 'agotada';
 
   const regularTotal = items.reduce(
