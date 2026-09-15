@@ -51,6 +51,7 @@ export interface OrderResponse {
   deliveryQuoteStatus: string | null;
   deliveryDistanceMeters: number | null;
   cashConfirmedAt: string | null;
+  statusUpdatedBy: string | null;
   createdAt: string;
   items: OrderItemResponse[];
 }
@@ -864,8 +865,16 @@ export class OrdersService {
     return existing;
   }
 
-  /** PATCH /orders/:id/status — transición legal + CAS optimista. */
-  async updateStatus(orderId: string, to: OrderStatus): Promise<OrderResponse> {
+  /**
+   * PATCH /orders/:id/status — transición legal + CAS optimista. `updatedBy`
+   * es el username del staff autenticado (tablero de cocina, JWT) — queda
+   * guardado en `status_updated_by` para saber quién movió el pedido.
+   */
+  async updateStatus(
+    orderId: string,
+    to: OrderStatus,
+    updatedBy: string | null,
+  ): Promise<OrderResponse> {
     const order = await this.db
       .selectFrom('orders')
       .selectAll()
@@ -880,7 +889,7 @@ export class OrdersService {
 
     const updated = await this.db
       .updateTable('orders')
-      .set({ status: to, updated_at: new Date() })
+      .set({ status: to, status_updated_by: updatedBy, updated_at: new Date() })
       .where('id', '=', orderId)
       .where('status', '=', order.status)
       .returningAll()
@@ -937,6 +946,7 @@ function toOrderResponse(
     delivery_quote_status: string | null;
     delivery_distance_meters: number | null;
     cash_confirmed_at: Date | string | null;
+    status_updated_by: string | null;
     created_at: Date | string;
   },
   items: {
@@ -968,6 +978,7 @@ function toOrderResponse(
     cashConfirmedAt: order.cash_confirmed_at
       ? new Date(order.cash_confirmed_at).toISOString()
       : null,
+    statusUpdatedBy: order.status_updated_by,
     createdAt: new Date(order.created_at).toISOString(),
     items: items.map((item) => ({
       productId: item.product_id,

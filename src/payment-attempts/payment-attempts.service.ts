@@ -1,8 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database, OrderPaymentStatus, PaymentAttemptReviewStatus } from '../database/types';
-import { NotFoundDomainError } from '../common/exceptions/domain-exception';
+import {
+  DomainException,
+  NotFoundDomainError,
+  ValidationError,
+} from '../common/exceptions/domain-exception';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 
 export interface PaymentAttemptResponse {
@@ -19,6 +23,10 @@ export interface DecidePaymentAttemptResult {
   attempt: PaymentAttemptResponse;
   /** true solo si ESTA llamada movió pending_review -> decision (invariante 5). */
   won: boolean;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
 }
 
 @Injectable()
@@ -75,18 +83,11 @@ export class PaymentAttemptsService {
         return { attempt: toResponse(current), won: false as const, customerId: null };
       }
 
-      const paymentStatus: OrderPaymentStatus = decision === 'accepted' ? 'paid' : 'rejected';
-      const order = await trx
-        .updateTable('orders')
-        .set({ payment_status: paymentStatus, updated_at: new Date() })
-        .where('id', '=', updated.order_id)
-        .returning(['customer_id'])
-        .executeTakeFirstOrThrow();
-
+      const customerId = await this.applyPaymentStatusEffect(trx, updated.order_id, decision);
       return {
         attempt: toResponse(updated),
         won: true as const,
-        customerId: updated.customer_id ?? order.customer_id,
+        customerId: updated.customer_id ?? customerId,
       };
     });
 
@@ -94,6 +95,81 @@ export class PaymentAttemptsService {
       this.notifyCustomerBestEffort(attemptId, result.customerId, decision);
     }
     return { attempt: result.attempt, won: result.won };
+  }
+
+  /**
+   * Cobro presencial en el POS: el cliente muestra el QR pagado ahí mismo,
+   * un cajero lo revisa a simple vista y decide en el momento — no hay foto
+   * ni `payment-proofs` de por medio. A diferencia de `decide()`, acá el
+   * `payment_attempt` se crea y se decide en el mismo paso (nunca pasa por
+   * 'pending_review'); el índice único parcial `uq_payment_attempts_live`
+   * igual protege de abrir un segundo intento si ya hay uno vivo (por
+   * ejemplo, uno pendiente por foto que llegó justo antes).
+   */
+  async confirmPresencial(
+    orderId: string,
+    decision: 'accepted' | 'rejected',
+  ): Promise<DecidePaymentAttemptResult> {
+    const result = await this.db.transaction().execute(async (trx) => {
+      const order = await trx
+        .selectFrom('orders')
+        .select(['id', 'customer_id', 'payment_method'])
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      if (!order) throw new NotFoundDomainError('order', orderId);
+      if (order.payment_method !== 'qr') {
+        throw new ValidationError('El pedido no es de pago QR.');
+      }
+
+      let inserted;
+      try {
+        inserted = await trx
+          .insertInto('payment_attempts')
+          .values({
+            order_id: orderId,
+            customer_id: order.customer_id,
+            opened_as: 'normal',
+            review_status: decision,
+            reviewed_at: new Date(),
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new DomainException(
+            'payment_attempt_already_live',
+            HttpStatus.CONFLICT,
+            'Ya hay un intento de pago pendiente o aceptado para este pedido.',
+          );
+        }
+        throw error;
+      }
+
+      const customerId = await this.applyPaymentStatusEffect(trx, orderId, decision);
+      return {
+        attempt: toResponse(inserted),
+        won: true as const,
+        customerId: order.customer_id ?? customerId,
+      };
+    });
+
+    this.notifyCustomerBestEffort(result.attempt.id, result.customerId, decision);
+    return { attempt: result.attempt, won: result.won };
+  }
+
+  private async applyPaymentStatusEffect(
+    trx: Transaction<Database>,
+    orderId: string,
+    decision: 'accepted' | 'rejected',
+  ): Promise<string | null> {
+    const paymentStatus: OrderPaymentStatus = decision === 'accepted' ? 'paid' : 'rejected';
+    const order = await trx
+      .updateTable('orders')
+      .set({ payment_status: paymentStatus, updated_at: new Date() })
+      .where('id', '=', orderId)
+      .returning(['customer_id'])
+      .executeTakeFirstOrThrow();
+    return order.customer_id;
   }
 
   private notifyCustomerBestEffort(

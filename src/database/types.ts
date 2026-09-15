@@ -95,6 +95,7 @@ export interface OrdersTable {
   delivery_fee_paid: Generated<boolean>;
   cash_confirmed_at: Timestamp | null;
   confirmed_at: Timestamp | null;
+  status_updated_by: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

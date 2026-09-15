@@ -66,8 +66,11 @@ simulado:
   snapshot de productos y combos, `product_unavailable` vs
   `promotion_unavailable`. Más `location` (dispara cotización de delivery),
   `kitchen-note`, `switch-to-pickup`, `cash/confirm`/`cash/cancel` (CAS),
-  `PATCH /status` (transición legal + CAS optimista), `GET /orders` con
-  filtros + paginación (`limit`/`offset`).
+  `PATCH /status` (transición legal + CAS optimista, requiere JWT +
+  rol `kitchen`/`admin` y guarda `status_updated_by`), `GET /orders`
+  (tablero de cocina, mismo JWT) con filtros + paginación (`limit`/
+  `offset`) — `GET /orders/:id` (un solo pedido) sigue con el token de
+  servicio.
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
   (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
   congelado en la misma transacción). Distancia vía `DistanceService`
@@ -88,6 +91,12 @@ simulado:
   gana ESTA llamada (`won: true`), en la misma transacción propaga a
   `orders.payment_status` (`paid`/`rejected`) y dispara un aviso best-effort
   al cliente — nunca si `won: false`, para no duplicar el efecto.
+  `POST /orders/:id/payment-attempts/confirm-presencial` (JWT, rol
+  `cashier`/`admin`) cubre el cobro QR en el mostrador: crea y decide el
+  intento en un solo paso, sin foto ni `payment-proofs` — sigue protegido
+  por el mismo índice único (`uq_payment_attempts_live`), así que no se
+  puede confirmar dos veces ni pisar un intento por foto que haya llegado
+  casi al mismo tiempo. Es provisorio hasta que entre la API de banco.
 - **`payment-proofs`** — intake completo: idempotencia por
   `source_message_id`, algoritmo de asociación `resolveAssociation` portado
   de saas_smarky (niveles reply_to_qr / candidatos estructurales / ventanas

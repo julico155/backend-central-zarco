@@ -15,6 +15,11 @@ import { Response } from 'express';
 import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
 import { IdempotencyKey } from '../common/decorators/idempotency-key.decorator';
 import { ApiClient } from '../common/decorators/api-client.decorator';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { CurrentStaffUser } from '../auth/current-staff-user.decorator';
+import { JwtPayload } from '../auth/auth.service';
 import { OrderStatus } from '../database/types';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -23,16 +28,20 @@ import { KitchenNoteDto } from './dto/kitchen-note.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 @Controller()
-@UseGuards(ServiceAuthGuard)
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Get('orders/:id')
+  @UseGuards(ServiceAuthGuard)
   findById(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.findById(id);
   }
 
+  // Tablero de cocina: login de staff (JWT), no el bearer estático del POS
+  // — así queda registrado qué persona movió cada pedido (status_updated_by).
   @Get('orders')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('kitchen', 'admin')
   findMany(
     @Query('customer_id') customerId?: string,
     @Query('status') status?: OrderStatus,
@@ -48,6 +57,7 @@ export class OrdersController {
   }
 
   @Post('orders')
+  @UseGuards(ServiceAuthGuard)
   async create(
     @Body() dto: CreateOrderDto,
     @IdempotencyKey() idempotencyKey: string,
@@ -60,38 +70,50 @@ export class OrdersController {
   }
 
   @Post('orders/:id/location-request')
+  @UseGuards(ServiceAuthGuard)
   @HttpCode(204)
   requestLocation(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.requestLocation(id);
   }
 
   @Post('orders/:id/location')
+  @UseGuards(ServiceAuthGuard)
   attachLocation(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AttachLocationDto) {
     return this.orders.attachLocation(id, dto);
   }
 
   @Post('orders/:id/kitchen-note')
+  @UseGuards(ServiceAuthGuard)
   addKitchenNote(@Param('id', ParseUUIDPipe) id: string, @Body() dto: KitchenNoteDto) {
     return this.orders.addKitchenNote(id, dto.note);
   }
 
   @Post('orders/:id/switch-to-pickup')
+  @UseGuards(ServiceAuthGuard)
   switchToPickup(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.switchToPickup(id);
   }
 
   @Post('orders/:id/cash/confirm')
+  @UseGuards(ServiceAuthGuard)
   confirmCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.confirmCash(id);
   }
 
   @Post('orders/:id/cash/cancel')
+  @UseGuards(ServiceAuthGuard)
   cancelCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.cancelCash(id);
   }
 
   @Patch('orders/:id/status')
-  updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateOrderStatusDto) {
-    return this.orders.updateStatus(id, dto.to);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('kitchen', 'admin')
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateOrderStatusDto,
+    @CurrentStaffUser() staffUser: JwtPayload,
+  ) {
+    return this.orders.updateStatus(id, dto.to, staffUser.username);
   }
 }

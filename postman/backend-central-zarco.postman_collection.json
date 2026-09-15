@@ -453,10 +453,10 @@
       "name": "Orders",
       "item": [
         {
-          "name": "Listar pedidos",
+          "name": "Listar pedidos (tablero cocina — JWT kitchen/admin)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{serviceToken}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwtToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/orders?limit=20&offset=0",
               "host": ["{{baseUrl}}"],
@@ -467,7 +467,8 @@
                 { "key": "customer_id", "value": "{{customerId}}", "disabled": true },
                 { "key": "status", "value": "confirmed", "disabled": true }
               ]
-            }
+            },
+            "description": "El listado (tablero) requiere JWT con rol kitchen o admin — ya no el token de servicio. Correr 'Login (admin)' alcanza para probar."
           }
         },
         {
@@ -603,12 +604,12 @@
           }
         },
         {
-          "name": "Cambiar estado del pedido",
+          "name": "Cambiar estado del pedido (tablero cocina — JWT kitchen/admin)",
           "request": {
             "method": "PATCH",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{serviceToken}}" }
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
             ],
             "body": { "mode": "raw", "raw": "{\n  \"to\": \"preparing\"\n}" },
             "url": {
@@ -616,7 +617,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["orders", "{{orderId}}", "status"]
             },
-            "description": "Transiciones legales: confirmed→preparing→ready→out_for_delivery→delivered, o cancelled desde casi cualquier estado."
+            "description": "Transiciones legales: confirmed→preparing→ready→out_for_delivery→delivered, o cancelled desde casi cualquier estado. Requiere JWT rol kitchen o admin; la respuesta trae statusUpdatedBy con el username de quien lo cambió."
           }
         }
       ]
@@ -713,6 +714,23 @@
               "path": ["payment-attempts", "{{paymentAttemptId}}", "decide"]
             },
             "description": "decision: 'accepted' | 'rejected'. Si gana el CAS, propaga a orders.payment_status y avisa al cliente."
+          }
+        },
+        {
+          "name": "Confirmar pago QR presencial (cashier/admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"decision\": \"accepted\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/payment-attempts/confirm-presencial",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}", "payment-attempts", "confirm-presencial"]
+            },
+            "description": "Cobro QR en el mostrador, sin foto: crea y decide el payment_attempt en el mismo paso. Requiere JWT rol cashier o admin. El pedido debe tener paymentMethod 'qr'. 409 payment_attempt_already_live si ya hay uno vivo (pending_review o accepted) para ese pedido."
           }
         }
       ]
