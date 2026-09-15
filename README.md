@@ -94,8 +94,11 @@ simulado:
   de 4h-24h, con `candidate_count` persistido para auditoría), routing bajo
   `pg_advisory_xact_lock` por cliente con `SAVEPOINT`s replicando las
   subtransacciones del RPC original, y un adaptador de storage
-  intercambiable (`PaymentProofStorage`) — hoy en disco local (decisión
-  deliberada por ahora), listo para swap a S3/R2 con credenciales reales.
+  intercambiable (`PaymentProofStorage`): `S3PaymentProofStorage` (AWS S3 o
+  cualquier S3-compatible — Cloudflare R2, MinIO — vía `endpoint`) ya
+  implementado y se activa solo con `PAYMENT_PROOFS_S3_BUCKET` +
+  credenciales en `.env`; sin bucket configurado usa disco local
+  automáticamente, mismo patrón de auto-selección que `DistanceService`.
 - **`auth`** — login JWT contra `dashboard_users` (bcrypt). Alta de staff
   vía API (`POST /auth/users`, `GET /auth/users`, `PATCH
   /auth/users/:id/active`), protegida con `@Roles('admin')` — el primer
@@ -107,10 +110,6 @@ simulado:
 
 ## Qué falta / deuda conocida
 
-- **S3/R2 real**: `PaymentProofsModule` usa `LocalDiskPaymentProofStorage`
-  por decisión explícita (disco local está bien por ahora) — cambiar el
-  provider por un adaptador S3/R2 cuando haya credenciales, mismo patrón
-  swap que `DistanceService`.
 - **Pago con QR bancario**: pendiente a propósito (dependencia externa aún
   no definida). El plan menciona una integración próxima con una API de
   banco. Hoy `payment_method: 'qr'` asume comprobante manual (foto) vía

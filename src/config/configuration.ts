@@ -19,6 +19,15 @@ export interface AppConfig {
     /** Vacío = sin credenciales todavía, DeliveryModule usa haversine (línea recta). */
     accessToken: string;
   };
+  s3: {
+    /** Vacío (sin bucket) = sin credenciales todavía, PaymentProofsModule usa disco local. */
+    bucket: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    /** Solo para proveedores S3-compatibles que no son AWS (Cloudflare R2, MinIO, etc.). Vacío = AWS S3. */
+    endpoint: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -51,5 +60,12 @@ export default (): AppConfig => ({
   },
   mapbox: {
     accessToken: process.env.MAPBOX_ACCESS_TOKEN ?? '',
+  },
+  s3: {
+    bucket: process.env.PAYMENT_PROOFS_S3_BUCKET ?? '',
+    region: process.env.PAYMENT_PROOFS_S3_REGION ?? 'auto',
+    accessKeyId: process.env.PAYMENT_PROOFS_S3_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.PAYMENT_PROOFS_S3_SECRET_ACCESS_KEY ?? '',
+    endpoint: process.env.PAYMENT_PROOFS_S3_ENDPOINT ?? '',
   },
 });
