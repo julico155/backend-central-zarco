@@ -5,6 +5,7 @@ import { Database, LateOrderRequestStatus } from '../database/types';
 import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { OrdersService } from '../orders/orders.service';
+import { CashRegisterService } from '../cash-register/cash-register.service';
 
 export interface LateOrderRequestResponse {
   id: string;
@@ -42,6 +43,7 @@ export class LateOrderRequestsService {
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly ordersService: OrdersService,
     private readonly notifications: NotificationsOutService,
+    private readonly cashRegister: CashRegisterService,
   ) {}
 
   async findById(id: string): Promise<LateOrderRequestResponse> {
@@ -102,6 +104,14 @@ export class LateOrderRequestsService {
         return { outcome: 'expired' };
       }
 
+      // Un pedido fuera de horario se vincula a la caja al ACEPTARSE (sea
+      // cash o QR) — ahí es donde entra oficialmente al turno. Si no hay
+      // caja abierta, esto tira 409 cash_register_closed sin escribir nada
+      // (no hay writes todavía en este punto): la solicitud queda 'pending'
+      // tal cual, para reintentar apenas alguien abra la caja — a
+      // diferencia de un carrito caído, esto no es una falla permanente.
+      const registerSessionId = await this.cashRegister.assertOpenSessionId(trx);
+
       // Los fallos permanentes (producto/promo caídos, etc.) NO se
       // reintentan: se atrapan y la solicitud queda 'rejected' con motivo
       // propio — nunca un bucle. SAVEPOINT explícito (no confiar en que
@@ -124,6 +134,7 @@ export class LateOrderRequestsService {
             quantity: number;
             revision: number;
           }[],
+          registerSessionId,
         });
 
         const updated = await trx

@@ -8,6 +8,7 @@ import {
   ValidationError,
 } from '../common/exceptions/domain-exception';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
+import { CashRegisterService } from '../cash-register/cash-register.service';
 
 export interface PaymentAttemptResponse {
   id: string;
@@ -36,6 +37,7 @@ export class PaymentAttemptsService {
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly notifications: NotificationsOutService,
+    private readonly cashRegister: CashRegisterService,
   ) {}
 
   async findByOrder(orderId: string): Promise<PaymentAttemptResponse[]> {
@@ -157,15 +159,37 @@ export class PaymentAttemptsService {
     return { attempt: result.attempt, won: result.won };
   }
 
+  /**
+   * `accepted` es plata que efectivamente entra (transferencia QR
+   * confirmada) — igual que `cash/confirm`, exige caja abierta y vincula el
+   * pedido a esa sesión, salvo que ya venga vinculado (pedido fuera de
+   * horario, se etiquetó al aceptarse). `rejected` no mueve plata, no toca
+   * la caja.
+   */
   private async applyPaymentStatusEffect(
     trx: Transaction<Database>,
     orderId: string,
     decision: 'accepted' | 'rejected',
   ): Promise<string | null> {
     const paymentStatus: OrderPaymentStatus = decision === 'accepted' ? 'paid' : 'rejected';
+
+    let registerSessionId: string | undefined;
+    if (decision === 'accepted') {
+      const current = await trx
+        .selectFrom('orders')
+        .select('register_session_id')
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      registerSessionId = current.register_session_id ?? (await this.cashRegister.assertOpenSessionId(trx));
+    }
+
     const order = await trx
       .updateTable('orders')
-      .set({ payment_status: paymentStatus, updated_at: new Date() })
+      .set({
+        payment_status: paymentStatus,
+        ...(registerSessionId !== undefined ? { register_session_id: registerSessionId } : {}),
+        updated_at: new Date(),
+      })
       .where('id', '=', orderId)
       .returning(['customer_id'])
       .executeTakeFirstOrThrow();

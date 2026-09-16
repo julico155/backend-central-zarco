@@ -77,7 +77,8 @@ convertirlas en `class` con `@ApiProperty()`.
   exponencial lo que quedó `pending`/`failed`.
 - Un módulo por dominio de negocio (`categories`, `products`, `customers`,
   `promotions`, `operational-settings`, `orders`, `delivery`,
-  `payment-attempts`, `payment-proofs`, `late-order-requests`, `auth`).
+  `payment-attempts`, `payment-proofs`, `late-order-requests`, `auth`,
+  `cash-register`).
 
 ## Qué está implementado
 
@@ -102,12 +103,15 @@ simulado:
   storage intercambiable (S3/R2 o disco local) que `payment-proofs`,
   reusando el mismo bucket.
 - **`orders`** — `POST /orders` porta `create_order_web_v5` (saas_smarky)
-  completo: gate de horario (17-22 abierto, 22-23 revisión nocturna, cierre
-  a las 23, hora de La Paz), `Idempotency-Key` genérica reemplazando
+  completo: gate de horario (`business_opens_hour`/`business_closes_hour`/
+  `late_review_closes_hour` en `operational_settings`, hora de La Paz —
+  el turno puede cruzar medianoche, ej. 19 a 4: las comparaciones son
+  relativas a la apertura, no horas absolutas del día — ver
+  `common/time/service-window.ts`), `Idempotency-Key` genérica reemplazando
   sesión+fingerprint, recálculo de precios/disponibilidad en servidor,
   snapshot de productos y combos, `product_unavailable` vs
   `promotion_unavailable`. Más `location` (dispara cotización de delivery),
-  `kitchen-note`, `switch-to-pickup`, `cash/confirm`/`cash/cancel` (CAS),
+  `kitchen-note`, `switch-to-pickup`, `cash/confirm`/`cash/cancel`,
   `PATCH /status` (transición legal + CAS optimista, requiere JWT +
   rol `kitchen`/`admin` y guarda `status_updated_by`; bloquea
   `confirmed → preparing` con `409 payment_required` si `payment_status`
@@ -118,7 +122,9 @@ simulado:
   `delivery_type`, `payment_status`) + paginación (`limit`/`offset`) —
   `delivery_type=delivery&payment_status=unpaid` es la cola de "cuadre con
   las motos" a fin de noche. `GET /orders/:id` (un solo pedido) sigue con
-  el token de servicio o cualquier JWT.
+  el token de servicio o cualquier JWT. `cash/confirm` y la decisión QR que
+  marca `accepted` vinculan el pedido a la caja abierta en ese momento (ver
+  `cash-register` abajo) — exigen que haya una.
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
   (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
   congelado en la misma transacción). Distancia vía `DistanceService`
@@ -129,11 +135,15 @@ simulado:
   usó de verdad.
 - **`late-order-requests`** — `accept`/`reject` requieren JWT + rol `admin`
   o `cashier` (`decidedBy` es el username del staff autenticado, no un
-  api_client de servicio). `accept` revalida el carrito completo reusando
-  `OrdersService.createOrderInTransaction` (con `SAVEPOINT` propio) y solo
-  entonces marca `accepted` con su `order_id`; fallos permanentes quedan
-  `rejected` con motivo, nunca en bucle. `GET /late-order-requests` lista
-  la cola (`pending` por defecto) para el dashboard.
+  api_client de servicio). `accept` exige una caja abierta (un pedido fuera
+  de horario se vincula a la sesión ahí mismo, sea cash o QR — es el
+  momento en que entra oficialmente al turno) y revalida el carrito
+  completo reusando `OrdersService.createOrderInTransaction` (con
+  `SAVEPOINT` propio) y solo entonces marca `accepted` con su `order_id`;
+  fallos permanentes quedan `rejected` con motivo, nunca en bucle; sin caja
+  abierta tira `409 cash_register_closed` sin tocar nada — la solicitud
+  sigue `pending` para reintentar. `GET /late-order-requests` lista la cola
+  (`pending` por defecto) para el dashboard.
 - **`payment-attempts`** — CAS puro `pending_review → accepted|rejected`
   con el índice único parcial como garantía de esquema. Cuando el CAS lo
   gana ESTA llamada (`won: true`), en la misma transacción propaga a
@@ -145,6 +155,22 @@ simulado:
   por el mismo índice único (`uq_payment_attempts_live`), así que no se
   puede confirmar dos veces ni pisar un intento por foto que haya llegado
   casi al mismo tiempo. Es provisorio hasta que entre la API de banco.
+- **`cash-register`** — apertura/cierre de caja (turno). Una sola sesión
+  `status='open'` a la vez para todo el local (índice único parcial), rol
+  `admin`/`cashier` (`POST /cash-register/sessions/open|close`, `GET
+  .../current` para cualquier staff, `GET .../:id` e historial para
+  admin/cashier). No es "solo plata física": agrupa cualquier pedido que se
+  confirma pagado (cash o QR) durante la sesión — el rango
+  `opened_at..closed_at` ES el "día de negocio", necesario porque el turno
+  real cruza medianoche. Un pedido normal se vincula recién cuando su pago
+  se confirma de verdad (`cash/confirm`, o la decisión QR que lo marca
+  `accepted`); uno fuera de horario se vincula al aceptarse (ver
+  `late-order-requests`). Consecuencia: **confirmar cualquier pago exige
+  caja abierta** — `409 cash_register_closed` si no la hay. El cierre
+  calcula `expectedCashAmount`/`cashDifference` contra `countedCashAmount`
+  y reporta `totalCashSalesAmount`/`totalQrSalesAmount`/`totalSalesAmount`,
+  todo calculado y congelado en el momento del cierre (no se recalcula
+  después).
 - **`payment-proofs`** — intake completo: idempotencia por
   `source_message_id`, algoritmo de asociación `resolveAssociation` portado
   de saas_smarky (niveles reply_to_qr / candidatos estructurales / ventanas
@@ -159,7 +185,8 @@ simulado:
 - **`auth`** — login JWT contra `dashboard_users` (bcrypt). Alta de staff
   vía API (`POST /auth/users`, `GET /auth/users`, `PATCH
   /auth/users/:id/active`), protegida con `@Roles('admin')` — el primer
-  admin se sigue creando por SQL directo (arranque en frío inevitable).
+  admin se crea con `npm run create-admin` (ver Setup arriba), ya que
+  `POST /auth/users` exige estar logueado como admin.
 - **`customers.findOrCreate`** — si `phone` y `email` llegan juntos y cada
   uno ya pertenece a un cliente distinto, se traduce a un 409
   (`customer_identity_conflict`) en vez de dejar escapar el unique
@@ -167,6 +194,12 @@ simulado:
 
 ## Qué falta / deuda conocida
 
+- **Horario real todavía no cargado**: `operational_settings` sigue con los
+  valores por defecto de la migración (17/22/23). El horario real del local
+  (19 a 4, cruza medianoche) hay que cargarlo con
+  `PATCH /operational-settings` — el gate ya soporta turnos que cruzan
+  medianoche (ver `orders` arriba), así que es solo cuestión de configurar
+  las horas correctas, no falta código.
 - **Pago con QR bancario**: pendiente a propósito (dependencia externa aún
   no definida). El plan menciona una integración próxima con una API de
   banco. Hoy `payment_method: 'qr'` asume comprobante manual (foto) vía

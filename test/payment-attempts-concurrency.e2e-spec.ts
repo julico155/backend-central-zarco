@@ -1,6 +1,7 @@
 import { Kysely } from 'kysely';
 import { PaymentAttemptsService } from '../src/payment-attempts/payment-attempts.service';
 import { NotificationsOutService } from '../src/notifications-out/notifications-out.service';
+import { CashRegisterService } from '../src/cash-register/cash-register.service';
 import { Database } from '../src/database/types';
 import { createTestDb, describeIfDb } from './utils/test-db';
 
@@ -23,13 +24,35 @@ const noopNotifications = { notifyNow: async () => undefined } as unknown as Not
 describeIfDb('PaymentAttemptsService.decide (integración, concurrencia)', () => {
   let db: Kysely<Database>;
   let service: PaymentAttemptsService;
+  // `decide('accepted')` ahora exige una caja abierta (vincula el pedido a
+  // la sesión, ver CashRegisterService.assertOpenSessionId) — si el test
+  // corre contra una base sin ninguna abierta, se siembra una acá y se
+  // borra al final; si ya había una real abierta, se respeta y no se toca.
+  let seededSessionId: string | null = null;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     db = createTestDb();
-    service = new PaymentAttemptsService(db, noopNotifications);
+    service = new PaymentAttemptsService(db, noopNotifications, new CashRegisterService(db));
+
+    const existingOpen = await db
+      .selectFrom('cash_register_sessions')
+      .select('id')
+      .where('status', '=', 'open')
+      .executeTakeFirst();
+    if (!existingOpen) {
+      const seeded = await db
+        .insertInto('cash_register_sessions')
+        .values({ opened_by: 'payment-attempts-concurrency.e2e-spec', opening_amount: '0' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      seededSessionId = seeded.id;
+    }
   });
 
   afterAll(async () => {
+    if (seededSessionId) {
+      await db.deleteFrom('cash_register_sessions').where('id', '=', seededSessionId).execute();
+    }
     await db.destroy();
   });
 

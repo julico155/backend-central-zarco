@@ -77,9 +77,44 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   no devuelve el pedido, devuelve `{attempt, won}` — hacé `GET /orders/:id`
   después si necesitás el pedido actualizado para el ticket. Requiere rol
   `cashier` o `admin`. Es provisorio (viene una integración de banco real).
-- **`GET /orders` (tablero)**: `customer_id` es snake_case, el resto no.
-  Array pelado sin `total`. `limit` se recorta a 200 en silencio. `status`
-  inválido devuelve `[]` sin avisar. No hay websockets — polling cada 5-10s.
+- **`GET /orders` (tablero, rol `kitchen`/`cashier`/`admin`)**: filtros
+  `customer_id`, `status`, `delivery_type`, `payment_status` (todos
+  snake_case). Array pelado sin `total`. `limit` se recorta a 200 en
+  silencio. `status` inválido devuelve `[]` sin avisar. No hay websockets —
+  polling cada 5-10s.
+- **`409 payment_required`** al intentar `confirmed → preparing` si
+  `paymentStatus !== 'paid'` — **excepto** `deliveryType: 'delivery'` +
+  `paymentMethod: 'cash'` (pago contra entrega real: el repartidor cobra al
+  llegar). El POS solo vende `pickup`, así que esto no te afecta al crear
+  pedidos, pero si el tablero de cocina también muestra pedidos de delivery
+  de WhatsApp vas a ver `preparing` con `paymentStatus: 'unpaid'`
+  legítimamente ahí — no lo marques como error.
+- **Cuadre con las motos** (pantalla de admin/cashier, no del POS de venta):
+  `GET /orders?delivery_type=delivery&payment_status=unpaid` lista los
+  delivery+efectivo todavía sin cobrar. Mismo `POST /orders/:id/cash/confirm`
+  de siempre para marcarlos cobrados — no hay endpoint nuevo, ni "marcar
+  varios a la vez", ni concepto de repartidor en el backend (el emparejamiento
+  con quién salió a repartir es humano). No confundir con la caja (sesión) de
+  abajo — esto es una consulta, no un turno.
+- **Caja (turno)**: NINGÚN cobro (cash o QR) se puede confirmar sin una caja
+  abierta — `POST /cash-register/sessions/open {openingAmount}` es la
+  primera pantalla del POS antes de poder vender, y
+  `GET /cash-register/sessions/current` (cualquier rol logueado) dice si ya
+  hay una. Una sola caja abierta a la vez para todo el local, rol
+  `admin`/`cashier`. `POST /cash-register/sessions/close
+  {countedCashAmount, notes?}` calcula y devuelve, todo ya hecho por el
+  backend: `expectedCashAmount`, `cashDifference` (negativo = faltó plata),
+  `totalCashSalesAmount`, `totalQrSalesAmount`, `totalSalesAmount` — nunca
+  los calcules vos. Sin caja abierta, cualquier intento de cobro da
+  `409 cash_register_closed` (mostrale al cajero que tiene que abrir caja,
+  no es error del pedido). Un pedido fuera de horario (`late-order-requests`)
+  se vincula a la caja al **aceptarse**, no al cobrarse — `accept` también
+  exige caja abierta y, si no hay, la solicitud queda `pending` sin tocar
+  nada (reintentable).
+- **El horario ahora puede cruzar medianoche** (el local real atiende 19 a
+  4). El gate ya lo soporta — no es nada que el front tenga que manejar
+  distinto, solo tené presente que `bypassHoursGate: true` sigue siendo
+  obligatorio para el POS como siempre.
 - **`status_conflict` (409) ≠ `invalid_state_transition` (409)**: el primero
   es una carrera entre dos pantallas de cocina (CAS optimista) — refrescar y
   reintentar, no mostrar error rojo. El segundo es un salto de estado ilegal.
@@ -93,15 +128,40 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   `isAvailable`). Promociones nuevas nacen inactivas, necesitan un segundo
   call a `PATCH /promotions/:id/active`. `items` de una promo exige 2
   elementos de producto distintos, no cuenta unidades.
+- **`GET /categories?includeInactive=true` y `GET /products?includeInactive=true`**
+  devuelven también las desactivadas — solo para poder reactivarlas desde el
+  mantenimiento de menú, la pantalla de venta usa el endpoint sin el query
+  param (que ya filtra).
+- **Foto de producto**: cada producto trae `imageUrl` (`null` o una ruta
+  relativa `/products/:id/image`, nunca una URL directa al bucket). Como
+  `<img src>` no manda headers, hay que `fetch` con el mismo
+  `Authorization: Bearer` de siempre y armar
+  `URL.createObjectURL(blob)` para el `src` — cacheá el blob en memoria por
+  producto. Subir: `POST /products/:id/image` (`{mimeType, fileBase64}`,
+  máx. 5MB, rol `admin`, reemplaza la foto anterior si había, no hay
+  endpoint para borrarla). El backend acepta bodies JSON de hasta 10MB.
 
 ## Estado del backend (ya hecho y verificado en producción — no lo toques)
 
 CORS configurado (`CORS_ORIGINS` en Railway), guard de auth compuesto, RLS
 activado en todas las tablas de Supabase, seed del primer admin
 (`npm run create-admin` en el repo del backend), `OrderResponse` con
-`promotions[]`. Todo probado end-to-end contra el backend real: login,
-catálogo con JWT, crear pedido con combo, idempotencia con reintento, cobro
-en efectivo — cuadró todo.
+`promotions[]`, fotos de producto (S3/R2 o disco local, migración aplicada),
+filtros `delivery_type`/`payment_status` en `GET /orders`, gate de
+`payment_required` con la excepción de delivery+cash, límite de body subido a
+10MB, horario cruzando medianoche, y caja (turno) — apertura/cierre,
+vinculación de pedidos al cobrarse (o al aceptarse si son fuera de horario),
+cierre con reporte cash/QR/total. Todo probado end-to-end contra el backend
+real: login, catálogo con JWT, crear pedido con combo, idempotencia con
+reintento, cobro en efectivo, subida y descarga de foto de producto — cuadró
+todo. La caja específicamente: pendiente de verificar contra producción
+(recién implementada), revisá con el repo del backend si tenés dudas de que
+algo no calce con lo documentado acá.
+
+Auto-deploy activo: un push a `master` en GitHub redespliega solo en Railway
+(las migraciones **no** corren solas — si alguien agrega una migración nueva,
+hay que aplicarla a mano, por `npm run migrate:up` o pegándola en el SQL
+Editor de Supabase).
 
 ## Por dónde arrancar
 

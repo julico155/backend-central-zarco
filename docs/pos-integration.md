@@ -169,7 +169,56 @@ Los totales que calculaste en pantalla son una estimación: el backend
 recalcula precios y disponibilidad del lado servidor. Imprimí siempre el
 `totalAmount` de la respuesta.
 
-## 5. Cobro
+## 5. Apertura y cierre de caja
+
+**Sin caja abierta no se puede cobrar nada** (ni efectivo ni QR) — es la
+primera pantalla que necesita el POS antes de vender. Una sola caja abierta
+a la vez para todo el local (no por cajero). Requiere rol `cashier` o
+`admin`:
+
+```
+POST /cash-register/sessions/open
+{ "openingAmount": 200 }             // efectivo con el que arranca el turno
+→ 201 CashRegisterSession
+```
+
+Si ya hay una caja abierta, da `409 cash_register_already_open`. Antes de
+mostrar el botón de "abrir caja", conviene chequear si ya hay una:
+
+```
+GET /cash-register/sessions/current   → CashRegisterSession | null
+```
+
+Cualquier rol logueado puede consultar esto (útil para saber si el POS ya
+puede vender). Al cerrar el turno:
+
+```
+POST /cash-register/sessions/close
+{ "countedCashAmount": 950, "notes": "opcional" }   // lo que el cajero contó a mano
+→ 200 CashRegisterSession (cerrada, con los totales ya calculados)
+```
+
+Si no hay ninguna abierta, da `409 cash_register_not_open`. La respuesta del
+cierre trae, todo ya calculado por el backend (nunca lo calcules vos):
+
+- `expectedCashAmount` — `openingAmount` + ventas en efectivo de la sesión.
+- `cashDifference` — `countedCashAmount - expectedCashAmount` (negativo = faltó plata).
+- `totalCashSalesAmount`, `totalQrSalesAmount`, `totalSalesAmount` — para el
+  resumen del turno (efectivo, QR, y el total del día).
+
+Estos números quedan **congelados en el momento del cierre** — no se
+recalculan después aunque algo cambie más tarde. `GET /cash-register/sessions/:id`
+(historial, `admin`/`cashier`) devuelve el mismo detalle de una sesión
+cerrada, para reimprimir el reporte del cierre.
+
+**Por qué esto bloquea el cobro**: cualquier pedido que se marca pagado (cash
+o QR) queda vinculado a la caja abierta en ese instante — es lo que permite
+calcular `totalCashSalesAmount`/`totalQrSalesAmount` al cerrar. Si intentás
+cobrar sin caja abierta, el endpoint de cobro correspondiente (ver abajo) da
+`409 cash_register_closed`: mostrale al cajero que tiene que abrir la caja
+primero, no es un error del pedido.
+
+## 6. Cobro
 
 ### Efectivo
 ```
@@ -178,7 +227,9 @@ POST /orders/:id/cash/cancel      → revierte si se equivocaron
 ```
 
 Ambos son idempotentes: llamarlos dos veces es seguro, no cobran doble.
-Devuelven el pedido completo actualizado.
+Devuelven el pedido completo actualizado. `cash/confirm` sin caja abierta da
+`409 cash_register_closed` (ver sección 5). `cash/cancel` desvincula el
+pedido de la caja (si el turno sigue abierto, ya no cuenta para el cierre).
 
 ### QR presencial (cliente paga en el mostrador)
 El cliente muestra el QR y paga ahí mismo — no hay foto ni
@@ -190,7 +241,10 @@ POST /orders/:id/payment-attempts/confirm-presencial
 { "decision": "accepted" | "rejected" }
 ```
 
-El `:id` es el **id del pedido**, no el del intento de pago.
+El `:id` es el **id del pedido**, no el del intento de pago. Igual que el
+cobro en efectivo, sin caja abierta da `409 cash_register_closed` — salvo
+que el pedido ya haya venido etiquetado a una caja (los pedidos fuera de
+horario se etiquetan al aceptarse, sección 8).
 
 ⚠️ A diferencia de los endpoints de efectivo, este **no devuelve el pedido**
 sino `{ attempt, won }`. Si necesitás el pedido actualizado para el ticket,
@@ -209,7 +263,7 @@ pensando en que este mecanismo va a durar.
 
 No hay `card` — no es parte del alcance.
 
-## 6. Tablero de pedidos (cocina) y cuadre de caja (cuadre con las motos)
+## 7. Tablero de pedidos (cocina) y cuadre con las motos
 
 **`GET /orders` requiere rol `kitchen`, `cashier` o `admin`.** La idea es
 que cada persona se loguee en su pantalla, así queda registrado quién
@@ -290,7 +344,14 @@ POST /orders/:id/cash/confirm
 Es el mismo endpoint que usa el cobro normal — no hay uno separado para
 "cuadre". Es idempotente (llamarlo dos veces no rompe nada) y devuelve el
 pedido actualizado con `paymentStatus: "paid"`. No hay endpoint de "marcar
-varios a la vez" — es uno por uno.
+varios a la vez" — es uno por uno. Igual que cualquier cobro, exige caja
+abierta (sección 5): si el repartidor liquida sin que nadie haya abierto la
+caja de esa noche, da `409 cash_register_closed`.
+
+⚠️ **No confundir con la caja de la sección 5.** Esto es una consulta ("qué
+falta cobrar"), no una sesión — no tiene apertura/cierre propios. El pedido
+que se cobra acá sí termina contando en el cierre de caja de la sesión que
+esté abierta en ese momento, junto con todo lo demás.
 
 No hay un concepto de "repartidor" en el backend (no hay tabla de motos ni
 se sabe quién entregó cada pedido) — el cuadre es puramente "estos son los
@@ -300,7 +361,7 @@ emparejamiento con quién salió a repartir qué.
 `GET /orders/:id` (un solo pedido, no el listado) es para imprimir tickets o
 consultar estado puntual, no para el tablero.
 
-## 7. Pantallas administrativas
+## 8. Pantallas administrativas
 
 Todas necesitan el rol correcto:
 
@@ -312,6 +373,13 @@ Todas necesitan el rol correcto:
 | Configuración del local (horario, recargo lluvia, ubicación) | `GET/PATCH /operational-settings` | lectura: cualquiera; escritura: `admin` |
 | Alta de staff | `POST/GET /auth/users`, `PATCH /auth/users/:id/active` | `admin` |
 | Pedidos fuera de horario (cola) | `GET /late-order-requests`, `POST /:id/accept`, `POST /:id/reject` | `admin` o `cashier` |
+| Apertura/cierre de caja | `POST /cash-register/sessions/open`, `/close` | `admin` o `cashier` |
+
+`POST /late-order-requests/:id/accept` exige caja abierta (sección 5) — es
+el momento en que un pedido fuera de horario entra oficialmente al turno,
+sea cash o QR. Sin caja abierta da `409 cash_register_closed` **sin tocar la
+solicitud**: sigue `pending`, reintentá apenas alguien abra la caja. `reject`
+no la necesita (no hay plata de por medio).
 
 Trampas del mantenimiento de menú, todas por `forbidNonWhitelisted`:
 
@@ -340,7 +408,7 @@ subís cualquier imagen en blanco; si hace falta un borrado real, pedilo y lo
 agregamos.
 - **`code` de producto duplicado** da `409 product_code_taken`.
 
-## 8. Manejo de errores
+## 9. Manejo de errores
 
 Todo error de negocio tiene esta forma, siempre:
 
@@ -371,13 +439,16 @@ Códigos que el POS puede encontrarse:
 | `invalid_state_transition` | 409 | Salto de estado ilegal |
 | `payment_required` | 409 | Falta confirmar el pago antes de `preparing` (no aplica a delivery+cash, es COD) |
 | `payment_attempt_already_live` | 409 | Ya hay un intento de pago vivo para ese pedido |
+| `cash_register_closed` | 409 | No hay caja abierta — mandá a abrir caja, no es error del pedido |
+| `cash_register_already_open` | 409 | Ya hay una caja abierta (al intentar abrir otra) |
+| `cash_register_not_open` | 409 | No hay caja abierta para cerrar |
 | `closed` | 409 | No debería pasar con `bypassHoursGate: true` |
 | `invalid_credentials` | 401 | Login fallido |
 | `not_found` | 404 | `details.resource` dice qué no se encontró |
 | `product_code_taken` / `username_taken` | 409 | Duplicado en alta de producto/staff |
 | `validation_error` / `http_error` | 400 | Error de formulario |
 
-## 9. Para probar mientras desarrollan
+## 10. Para probar mientras desarrollan
 
 - **Swagger UI** en `/docs` y el OpenAPI crudo en `/docs-json`, generados
   desde el código. Podés generar los tipos de request del cliente con

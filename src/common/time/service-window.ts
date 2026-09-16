@@ -4,6 +4,13 @@
  * mismas fronteras, solo que las horas ahora son configurables
  * (operational_settings) en vez de constantes.
  *
+ * El turno real del local cruza la medianoche (ej. 19 a 4). Las
+ * comparaciones se hacen con la hora normalizada RELATIVA a `opensHour`
+ * (aritmética modular de 24hs), no con la hora absoluta del día — así
+ * "19 a 4" se convierte internamente en "0 a 9" y las mismas comparaciones
+ * `>=` de siempre vuelven a ser válidas sin importar que crucen la
+ * medianoche.
+ *
  * Bolivia es UTC-4 todo el año (no observa horario de verano desde 1932) —
  * el fallback aritmético solo se usa si el runtime no trae Intl con zonas.
  */
@@ -43,19 +50,27 @@ function hourByArithmetic(ms: number): number | null {
   return Number.isInteger(hour) ? hour : null;
 }
 
+/** Horas desde la apertura, en [0, 24) — hace que cruzar la medianoche sea aritmética normal. */
+function hoursSinceOpen(hour: number, opensHour: number): number {
+  return ((hour - opensHour) % 24 + 24) % 24;
+}
+
 /**
- * Las tres fronteras caen en punto: basta comparar horas enteras. El cierre
- * (>= closesHour) se comprueba ANTES que late_review. Un instante ilegible
- * (NaN) sale 'closed': ante la duda, no se toma un pedido que nadie va a
- * cocinar.
+ * Las tres fronteras caen en punto: basta comparar horas enteras, ya
+ * normalizadas relativas a `opensHour` (ver comentario de cabecera). El
+ * cierre (>= closesHour) se comprueba ANTES que late_review. Un instante
+ * ilegible (NaN) sale 'closed': ante la duda, no se toma un pedido que nadie
+ * va a cocinar.
  */
 export function classifyServiceWindow(instant: Date, hours: ServiceHours): ServiceWindow {
   const hour = hourInBolivia(instant);
   if (hour === null) return 'closed';
-  if (hour >= hours.closesHour) return 'closed';
-  if (hour >= hours.lateReviewHour) return 'late_review';
-  if (hour >= hours.opensHour) return 'open';
-  return 'closed';
+  const relHour = hoursSinceOpen(hour, hours.opensHour);
+  const relLateReview = hoursSinceOpen(hours.lateReviewHour, hours.opensHour);
+  const relCloses = hoursSinceOpen(hours.closesHour, hours.opensHour);
+  if (relHour >= relCloses) return 'closed';
+  if (relHour >= relLateReview) return 'late_review';
+  return 'open';
 }
 
 export type CheckoutGate = { gate: 'proceed' } | { gate: 'late_review' } | { gate: 'closed' };

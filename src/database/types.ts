@@ -98,6 +98,8 @@ export interface OrdersTable {
   cash_confirmed_at: Timestamp | null;
   confirmed_at: Timestamp | null;
   status_updated_by: string | null;
+  /** Caja (turno) donde se confirmó el pago — null hasta que se cobra (o al aceptarse, si fue fuera de horario). */
+  register_session_id: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -173,6 +175,30 @@ export interface PaymentAttemptsTable {
   reviewed_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export type CashRegisterSessionStatus = 'open' | 'closed';
+
+/**
+ * Caja (turno). Una sola fila `status='open'` a la vez (índice único
+ * parcial en la migración) — cubre efectivo y QR por igual, no solo plata
+ * física: agrupa cualquier pedido confirmado pagado durante la sesión.
+ */
+export interface CashRegisterSessionsTable {
+  id: Generated<string>;
+  status: Generated<CashRegisterSessionStatus>;
+  opened_at: Timestamp;
+  opened_by: string;
+  opening_amount: string;
+  closed_at: Timestamp | null;
+  closed_by: string | null;
+  counted_cash_amount: string | null;
+  expected_cash_amount: string | null;
+  cash_difference: string | null;
+  total_cash_sales_amount: string | null;
+  total_qr_sales_amount: string | null;
+  total_sales_amount: string | null;
+  notes: string | null;
 }
 
 export type PaymentProofMatchMethod =
@@ -316,6 +342,7 @@ export interface Database {
   promotions: PromotionsTable;
   promotion_items: PromotionItemsTable;
   order_promotions: OrderPromotionsTable;
+  cash_register_sessions: CashRegisterSessionsTable;
   operational_settings: OperationalSettingsTable;
   dashboard_users: DashboardUsersTable;
   notification_jobs: NotificationJobsTable;

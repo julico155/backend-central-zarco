@@ -17,6 +17,7 @@ import { PaymentAttemptsModule } from './payment-attempts/payment-attempts.modul
 import { PaymentProofsModule } from './payment-proofs/payment-proofs.module';
 import { LateOrderRequestsModule } from './late-order-requests/late-order-requests.module';
 import { AuthModule } from './auth/auth.module';
+import { CashRegisterModule } from './cash-register/cash-register.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AuthModule } from './auth/auth.module';
     PaymentProofsModule,
     LateOrderRequestsModule,
     AuthModule,
+    CashRegisterModule,
   ],
 })
 export class AppModule {}

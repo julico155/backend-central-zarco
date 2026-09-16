@@ -24,6 +24,7 @@ import { checkoutGateAt, lateRequestExpiryFor } from '../common/time/service-win
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
 import { DeliveryService } from '../delivery/delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
+import { CashRegisterService } from '../cash-register/cash-register.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 export interface OrderItemResponse {
@@ -90,6 +91,8 @@ export interface CheckoutCartInput {
   notes: string | null;
   items: { productId: string; quantity: number }[];
   promotions: { promotionId: string; quantity: number; revision: number }[];
+  /** Solo lo pasa LateOrderRequestsService.accept() — un pedido normal nace sin caja, se vincula recién al cobrarse. */
+  registerSessionId?: string | null;
 }
 
 const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -119,6 +122,7 @@ export class OrdersService {
     private readonly operationalSettings: OperationalSettingsService,
     private readonly deliveryService: DeliveryService,
     private readonly notifications: NotificationsOutService,
+    private readonly cashRegister: CashRegisterService,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -496,6 +500,7 @@ export class OrdersService {
         delivery_pricing: deliveryPricing,
         delivery_quote_status: deliveryQuoteStatus,
         confirmed_at: confirmedAt,
+        register_session_id: input.registerSessionId ?? null,
       })
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -783,16 +788,41 @@ export class OrdersService {
   /**
    * CAS sobre cash_confirmed_at (invariante 5): el efecto (avisar grupo de
    * delivery, luego al cliente) solo se dispara si ESTA llamada ganó el CAS.
+   *
+   * Vincula el pedido a la caja abierta en este momento (invariante de
+   * caja: la plata se atribuye al turno en que entra de verdad) — salvo que
+   * ya venga vinculado (pedido fuera de horario, se etiquetó al aceptarse).
+   * Por eso deja de ser un UPDATE suelto y pasa a `SELECT ... FOR UPDATE` +
+   * transacción, igual que `switchToPickup`.
    */
   async confirmCash(orderId: string): Promise<OrderResponse> {
-    const updated = await this.db
-      .updateTable('orders')
-      .set({ cash_confirmed_at: new Date(), payment_status: 'paid', updated_at: new Date() })
-      .where('id', '=', orderId)
-      .where('payment_method', '=', 'cash')
-      .where('cash_confirmed_at', 'is', null)
-      .returningAll()
-      .executeTakeFirst();
+    const updated = await this.db.transaction().execute(async (trx) => {
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) throw new NotFoundDomainError('order', orderId);
+      if (order.payment_method !== 'cash') {
+        throw new ValidationError('El pedido no es de pago en efectivo.');
+      }
+      if (order.cash_confirmed_at !== null) return null; // ya confirmado, comportamiento idempotente de abajo
+
+      const registerSessionId = order.register_session_id ?? (await this.cashRegister.assertOpenSessionId(trx));
+
+      return trx
+        .updateTable('orders')
+        .set({
+          cash_confirmed_at: new Date(),
+          payment_status: 'paid',
+          register_session_id: registerSessionId,
+          updated_at: new Date(),
+        })
+        .where('id', '=', orderId)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+    });
 
     if (!updated) {
       const existing = await this.findExistingCashOrder(orderId);
@@ -836,7 +866,12 @@ export class OrdersService {
   async cancelCash(orderId: string): Promise<OrderResponse> {
     const updated = await this.db
       .updateTable('orders')
-      .set({ cash_confirmed_at: null, payment_status: 'unpaid', updated_at: new Date() })
+      .set({
+        cash_confirmed_at: null,
+        payment_status: 'unpaid',
+        register_session_id: null,
+        updated_at: new Date(),
+      })
       .where('id', '=', orderId)
       .where('payment_method', '=', 'cash')
       .where('cash_confirmed_at', 'is not', null)

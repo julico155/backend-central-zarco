@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { NotificationsOutModule } from '../notifications-out/notifications-out.module';
 import { OperationalSettingsModule } from '../operational-settings/operational-settings.module';
 import { DeliveryModule } from '../delivery/delivery.module';
+import { CashRegisterModule } from '../cash-register/cash-register.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 
@@ -14,6 +15,7 @@ import { OrdersService } from './orders.service';
     NotificationsOutModule,
     OperationalSettingsModule,
     DeliveryModule,
+    CashRegisterModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],
