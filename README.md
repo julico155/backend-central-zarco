@@ -91,6 +91,16 @@ simulado:
   `status` calculado), **`operational-settings`** (horario, recargo por
   lluvia, coordenadas del restaurante). Escritura protegida por JWT +
   `@Roles('admin')` (disponibilidad de producto también admite `kitchen`).
+  `GET /categories` y `GET /products` filtran los inactivos por defecto
+  (lo que consume el catálogo de venta); `?includeInactive=true` los trae
+  también, para el mantenimiento de menú (poder reactivarlos).
+  `products` incluye foto: `POST /products/:id/image` (JWT, rol `admin`,
+  base64 en el body como `payment-proofs`, máx. 5 MB, reemplaza la anterior)
+  y `GET /products/:id/image` (mismo guard que el catálogo, `imageUrl` en
+  `ProductResponse` es la ruta relativa o `null`) — se sirve siempre a
+  través del backend, nunca una URL directa al bucket, mismo adaptador de
+  storage intercambiable (S3/R2 o disco local) que `payment-proofs`,
+  reusando el mismo bucket.
 - **`orders`** — `POST /orders` porta `create_order_web_v5` (saas_smarky)
   completo: gate de horario (17-22 abierto, 22-23 revisión nocturna, cierre
   a las 23, hora de La Paz), `Idempotency-Key` genérica reemplazando

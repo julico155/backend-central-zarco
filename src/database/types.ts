@@ -32,6 +32,8 @@ export interface ProductsTable {
   is_active: Generated<boolean>;
   is_available: Generated<boolean>;
   sort_order: Generated<number>;
+  image_key: string | null;
+  image_mime_type: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

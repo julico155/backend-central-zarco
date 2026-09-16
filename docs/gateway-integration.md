@@ -43,6 +43,12 @@ GET /products
 GET /promotions
 ```
 
+Cada producto trae `imageUrl` — `null` si no tiene foto, o una ruta relativa
+(`/products/:id/image`) si tiene. Para mandarla por WhatsApp: pedila con
+`GET <baseUrl><imageUrl>` con tu mismo bearer de servicio, y subí los bytes
+que te devuelve a la Media API de WhatsApp (no es una URL pública que
+puedas pasarle directo a Meta).
+
 ### 2.3 Crear pedido
 
 ```

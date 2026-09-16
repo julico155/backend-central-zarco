@@ -74,11 +74,21 @@ como `number` (formatealos con dos decimales, el backend no lo hace).
 expiradas y programadas mezcladas, a diferencia de `/categories` y
 `/products`. Filtrá por `status === 'activa'` en el cliente.
 
+**Foto de producto**: cada producto trae `imageUrl` — `null` si no tiene
+foto, o una ruta relativa (`/products/:id/image`) si tiene. No es una URL
+directa al bucket: hay que pedirla con el mismo header `Authorization` que
+usás para el resto de la API (el bearer del POS o la sesión del cajero,
+cualquiera de los dos sirve). Como `<img src>` no manda headers, en el
+navegador hacés `fetch` con el header y armás un `URL.createObjectURL(blob)`
+para el `src`; cacheá ese blob en memoria por producto para no repetir el
+fetch en cada render.
+
 Las promociones traen `revision`: guardalo, se necesita al armar el pedido
 (ver 4).
 
-`GET /categories?includeInactive=true` devuelve también las desactivadas —
-solo para la pantalla de mantenimiento de menú, no para vender.
+`GET /categories?includeInactive=true` y `GET /products?includeInactive=true`
+devuelven también las desactivadas/os — solo para la pantalla de
+mantenimiento de menú (para poder reactivarlas), no para vender.
 
 ## 3. Cliente (opcional)
 
@@ -297,6 +307,7 @@ Todas necesitan el rol correcto:
 | Pantalla | Endpoints | Rol |
 |---|---|---|
 | Mantenimiento de menú | `POST/PATCH /categories`, `/products`, `/promotions` | `admin` |
+| Foto de producto | `POST /products/:id/image` (ver abajo) | `admin` |
 | Marcar producto agotado | `PATCH /products/:id/availability` | `admin` o `kitchen` |
 | Configuración del local (horario, recargo lluvia, ubicación) | `GET/PATCH /operational-settings` | lectura: cualquiera; escritura: `admin` |
 | Alta de staff | `POST/GET /auth/users`, `PATCH /auth/users/:id/active` | `admin` |
@@ -314,6 +325,19 @@ Trampas del mantenimiento de menú, todas por `forbidNonWhitelisted`:
 - **`items` de una promoción exige 2 elementos distintos**: un combo de "2× el
   mismo producto" es rechazado (la validación cuenta elementos del array, no
   unidades).
+
+**Subir foto de producto**:
+
+```
+POST /products/:id/image
+{ "mimeType": "image/jpeg" | "image/png" | "image/webp", "fileBase64": "<bytes en base64>" }
+→ 200 ProductResponse (con imageUrl ya seteado)
+```
+
+Máximo 5 MB. Subir una foto nueva **reemplaza** la anterior (no hace falta
+borrar antes). No hay endpoint para borrar la foto — para "sacarla" hoy
+subís cualquier imagen en blanco; si hace falta un borrado real, pedilo y lo
+agregamos.
 - **`code` de producto duplicado** da `409 product_code_taken`.
 
 ## 8. Manejo de errores
