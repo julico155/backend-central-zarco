@@ -3,12 +3,21 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { DomainExceptionFilter } from './common/filters/domain-exception.filter';
 import { AppConfig } from './config/configuration';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // bodyParser: false + límite propio: el default de Nest/Express (~100KB)
+  // rechaza cualquier body con fileBase64 real (foto de producto, comprobante
+  // de pago) apenas se pasa de una imagen trivial de prueba. Si no se apaga
+  // el parser default acá, éste igual intercepta el request antes de que
+  // corra el de abajo, y el límite chico sigue aplicando.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
+
   const config = app.get(ConfigService<AppConfig, true>);
 
   // El JWT de staff viaja en el header Authorization, no en cookie: sin
