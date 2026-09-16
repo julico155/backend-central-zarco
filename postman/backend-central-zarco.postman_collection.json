@@ -617,7 +617,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["orders", "{{orderId}}", "status"]
             },
-            "description": "Transiciones legales: confirmed→preparing→ready→out_for_delivery→delivered, o cancelled desde casi cualquier estado. Requiere JWT rol kitchen o admin; la respuesta trae statusUpdatedBy con el username de quien lo cambió."
+            "description": "Transiciones legales: confirmed→preparing→ready→out_for_delivery→delivered, o cancelled desde casi cualquier estado. Requiere JWT rol kitchen o admin; la respuesta trae statusUpdatedBy con el username de quien lo cambió. confirmed→preparing da 409 payment_required si payment_status no es 'paid' (nunca hay pago contra entrega) — confirmá el pago primero (cash/confirm o QR)."
           }
         }
       ]

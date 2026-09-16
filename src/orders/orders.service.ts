@@ -860,6 +860,11 @@ export class OrdersService {
    * PATCH /orders/:id/status — transición legal + CAS optimista. `updatedBy`
    * es el username del staff autenticado (tablero de cocina, JWT) — queda
    * guardado en `status_updated_by` para saber quién movió el pedido.
+   *
+   * Nunca hay pago contra entrega (ni en delivery ni en POS): cocina no
+   * puede empezar a preparar un pedido que no está `paid` — el gate va
+   * específicamente en `-> preparing` (es recién ahí que el total ya es
+   * definitivo; para delivery ni siquiera se conoce hasta cotizar).
    */
   async updateStatus(
     orderId: string,
@@ -876,6 +881,15 @@ export class OrdersService {
     const allowed = ORDER_STATUS_TRANSITIONS[order.status] ?? [];
     if (!allowed.includes(to)) {
       throw new InvalidStateTransitionError('order', order.status, to);
+    }
+
+    if (to === 'preparing' && order.payment_status !== 'paid') {
+      throw new DomainException(
+        'payment_required',
+        HttpStatus.CONFLICT,
+        'El pedido debe estar pagado antes de empezar a prepararse.',
+        { paymentStatus: order.payment_status },
+      );
     }
 
     const updated = await this.db

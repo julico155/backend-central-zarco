@@ -240,9 +240,13 @@ otro operario movió el pedido entre que lo leíste y lo mandaste. Con varias
 pantallas de cocina abiertas **va a pasar**: refrescá el pedido y mostrá el
 estado actual, no un error rojo.
 
-⚠️ `status` y `paymentStatus` son **independientes**: nada impide un pedido
-`delivered` con `paymentStatus: 'unpaid'`. El backend no lo valida ni avisa,
-así que conviene marcarlo visualmente.
+**Nunca hay pago contra entrega** (ni en delivery ni en POS): el backend
+bloquea específicamente `confirmed → preparing` si `paymentStatus` no es
+`paid` — `409 payment_required`. Confirmá el pago (`cash/confirm` o QR)
+antes de mandar el pedido a cocina. Las demás transiciones
+(`preparing → ready → ...`) no vuelven a chequear el pago — si alguien
+cancela el efectivo (`cash/cancel`) después de que ya empezó a prepararse,
+el pedido sigue avanzando igual; marcalo visualmente si eso pasa.
 
 `GET /orders/:id` (un solo pedido, no el listado) es para imprimir tickets o
 consultar estado puntual, no para el tablero.
@@ -302,6 +306,7 @@ Códigos que el POS puede encontrarse:
 | `idempotency_key_reused` | 409 | Bug del cliente: misma key con distinto body |
 | `status_conflict` | 409 | Carrera entre pantallas: refrescar y reintentar |
 | `invalid_state_transition` | 409 | Salto de estado ilegal |
+| `payment_required` | 409 | Falta confirmar el pago antes de `preparing` |
 | `payment_attempt_already_live` | 409 | Ya hay un intento de pago vivo para ese pedido |
 | `closed` | 409 | No debería pasar con `bypassHoursGate: true` |
 | `invalid_credentials` | 401 | Login fallido |

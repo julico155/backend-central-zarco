@@ -99,10 +99,12 @@ simulado:
   `promotion_unavailable`. Más `location` (dispara cotización de delivery),
   `kitchen-note`, `switch-to-pickup`, `cash/confirm`/`cash/cancel` (CAS),
   `PATCH /status` (transición legal + CAS optimista, requiere JWT +
-  rol `kitchen`/`admin` y guarda `status_updated_by`), `GET /orders`
-  (tablero de cocina, mismo JWT) con filtros + paginación (`limit`/
-  `offset`) — `GET /orders/:id` (un solo pedido) sigue con el token de
-  servicio.
+  rol `kitchen`/`admin` y guarda `status_updated_by`; bloquea
+  `confirmed → preparing` con `409 payment_required` si `payment_status`
+  no es `paid` — nunca hay pago contra entrega, ni en delivery ni en POS),
+  `GET /orders` (tablero de cocina, mismo JWT) con filtros + paginación
+  (`limit`/`offset`) — `GET /orders/:id` (un solo pedido) sigue con el
+  token de servicio.
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
   (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
   congelado en la misma transacción). Distancia vía `DistanceService`
