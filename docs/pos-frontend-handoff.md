@@ -105,12 +105,15 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   {countedCashAmount, notes?}` calcula y devuelve, todo ya hecho por el
   backend: `expectedCashAmount`, `cashDifference` (negativo = faltó plata),
   `totalCashSalesAmount`, `totalQrSalesAmount`, `totalSalesAmount` — nunca
-  los calcules vos. Sin caja abierta, cualquier intento de cobro da
+  los calcules vos (solo cuentan pedidos ya `paid`, no lo vinculado-pero-sin-
+  cobrar todavía). Sin caja abierta, cualquier intento de cobro da
   `409 cash_register_closed` (mostrale al cajero que tiene que abrir caja,
   no es error del pedido). Un pedido fuera de horario (`late-order-requests`)
   se vincula a la caja al **aceptarse**, no al cobrarse — `accept` también
   exige caja abierta y, si no hay, la solicitud queda `pending` sin tocar
-  nada (reintentable).
+  nada (reintentable). Ojo: un pedido tardío en efectivo queda vinculado y
+  puede seguir `unpaid` un rato hasta que alguien haga `cash/confirm` — no
+  cuenta en el cierre hasta ese momento.
 - **El horario ahora puede cruzar medianoche** (el local real atiende 19 a
   4). El gate ya lo soporta — no es nada que el front tenga que manejar
   distinto, solo tené presente que `bypassHoursGate: true` sigue siendo

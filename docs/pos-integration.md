@@ -204,7 +204,12 @@ cierre trae, todo ya calculado por el backend (nunca lo calcules vos):
 - `expectedCashAmount` — `openingAmount` + ventas en efectivo de la sesión.
 - `cashDifference` — `countedCashAmount - expectedCashAmount` (negativo = faltó plata).
 - `totalCashSalesAmount`, `totalQrSalesAmount`, `totalSalesAmount` — para el
-  resumen del turno (efectivo, QR, y el total del día).
+  resumen del turno (efectivo, QR, y el total del día). Solo cuenta lo que
+  **ya está pagado** (`paymentStatus: 'paid'`): un pedido tardío en efectivo
+  queda vinculado a la caja al aceptarse (sección 8), pero no suma acá hasta
+  que alguien haga `cash/confirm` — si se cierra la caja mientras sigue
+  `unpaid`, ese pedido simplemente no entra en el total, no se pierde ni
+  queda mal contado.
 
 Estos números quedan **congelados en el momento del cierre** — no se
 recalculan después aunque algo cambie más tarde. `GET /cash-register/sessions/:id`

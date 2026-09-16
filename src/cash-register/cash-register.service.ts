@@ -76,10 +76,14 @@ export class CashRegisterService {
         );
       }
 
+      // Solo lo YA pagado: un pedido tardío se vincula a la caja al
+      // aceptarse (antes de cobrarse), así que sin este filtro un cash
+      // todavía impago contaría como plata ya en el cajón.
       const sums = await trx
         .selectFrom('orders')
         .select(['payment_method', sql<string>`coalesce(sum(total_amount), 0)`.as('total')])
         .where('register_session_id', '=', open.id)
+        .where('payment_status', '=', 'paid')
         .groupBy('payment_method')
         .execute();
       const totalCash = Number(sums.find((s) => s.payment_method === 'cash')?.total ?? 0);
