@@ -240,10 +240,19 @@ otro operario movió el pedido entre que lo leíste y lo mandaste. Con varias
 pantallas de cocina abiertas **va a pasar**: refrescá el pedido y mostrá el
 estado actual, no un error rojo.
 
-**Nunca hay pago contra entrega** (ni en delivery ni en POS): el backend
-bloquea específicamente `confirmed → preparing` si `paymentStatus` no es
-`paid` — `409 payment_required`. Confirmá el pago (`cash/confirm` o QR)
-antes de mandar el pedido a cocina. Las demás transiciones
+El backend bloquea `confirmed → preparing` con `409 payment_required` si
+`paymentStatus` no es `paid` — **excepto** para pedidos de delivery
+pagados en efectivo (`deliveryType: 'delivery'` + `paymentMethod: 'cash'`):
+ese es el único caso real de pago contra entrega, el repartidor cobra al
+llegar, así que ahí `preparing` no exige pago todavía. Como el POS solo
+vende `pickup`, esto no te afecta al crear pedidos — sí importa si el
+mismo tablero de cocina muestra también pedidos de delivery que vinieron
+por WhatsApp: para esos vas a ver `preparing` con `paymentStatus: 'unpaid'`
+legítimamente, no lo marques como error.
+
+Para todo lo demás (pickup con cualquier método, o delivery con QR — un
+QR no se "entrega") sí hay que confirmar el pago (`cash/confirm` o QR)
+antes de mandar a cocina. Las transiciones posteriores
 (`preparing → ready → ...`) no vuelven a chequear el pago — si alguien
 cancela el efectivo (`cash/cancel`) después de que ya empezó a prepararse,
 el pedido sigue avanzando igual; marcalo visualmente si eso pasa.
@@ -306,7 +315,7 @@ Códigos que el POS puede encontrarse:
 | `idempotency_key_reused` | 409 | Bug del cliente: misma key con distinto body |
 | `status_conflict` | 409 | Carrera entre pantallas: refrescar y reintentar |
 | `invalid_state_transition` | 409 | Salto de estado ilegal |
-| `payment_required` | 409 | Falta confirmar el pago antes de `preparing` |
+| `payment_required` | 409 | Falta confirmar el pago antes de `preparing` (no aplica a delivery+cash, es COD) |
 | `payment_attempt_already_live` | 409 | Ya hay un intento de pago vivo para ese pedido |
 | `closed` | 409 | No debería pasar con `bypassHoursGate: true` |
 | `invalid_credentials` | 401 | Login fallido |

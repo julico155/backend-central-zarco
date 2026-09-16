@@ -861,10 +861,11 @@ export class OrdersService {
    * es el username del staff autenticado (tablero de cocina, JWT) — queda
    * guardado en `status_updated_by` para saber quién movió el pedido.
    *
-   * Nunca hay pago contra entrega (ni en delivery ni en POS): cocina no
-   * puede empezar a preparar un pedido que no está `paid` — el gate va
-   * específicamente en `-> preparing` (es recién ahí que el total ya es
-   * definitivo; para delivery ni siquiera se conoce hasta cotizar).
+   * Pago contra entrega SOLO existe para delivery + cash (el repartidor
+   * cobra en la puerta) — ahí `preparing` no exige `paid` todavía. Todo lo
+   * demás (pickup/POS, y delivery con QR — un QR no se "entrega") sí exige
+   * `payment_status: 'paid'` antes de `-> preparing`, porque en esos casos
+   * el pago siempre se confirma ANTES de que cocina empiece.
    */
   async updateStatus(
     orderId: string,
@@ -883,7 +884,8 @@ export class OrdersService {
       throw new InvalidStateTransitionError('order', order.status, to);
     }
 
-    if (to === 'preparing' && order.payment_status !== 'paid') {
+    const isCashOnDelivery = order.delivery_type === 'delivery' && order.payment_method === 'cash';
+    if (to === 'preparing' && !isCashOnDelivery && order.payment_status !== 'paid') {
       throw new DomainException(
         'payment_required',
         HttpStatus.CONFLICT,

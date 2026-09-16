@@ -101,7 +101,8 @@ simulado:
   `PATCH /status` (transición legal + CAS optimista, requiere JWT +
   rol `kitchen`/`admin` y guarda `status_updated_by`; bloquea
   `confirmed → preparing` con `409 payment_required` si `payment_status`
-  no es `paid` — nunca hay pago contra entrega, ni en delivery ni en POS),
+  no es `paid` — excepto delivery + `cash`, el único caso real de pago
+  contra entrega, donde el repartidor cobra al llegar),
   `GET /orders` (tablero de cocina, mismo JWT) con filtros + paginación
   (`limit`/`offset`) — `GET /orders/:id` (un solo pedido) sigue con el
   token de servicio.
