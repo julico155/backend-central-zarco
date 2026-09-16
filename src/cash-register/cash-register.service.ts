@@ -21,6 +21,23 @@ export interface CashRegisterSessionResponse {
   notes: string | null;
 }
 
+/**
+ * Totales de la caja abierta calculados al vuelo, para que el POS muestre
+ * cómo va el turno sin esperar al cierre. Los campos congelados de la fila
+ * (`expectedCashAmount` y compañía) siguen en null hasta cerrar: estos son
+ * el estado de este momento, no el número firmado del arqueo.
+ */
+export interface CashRegisterLiveTotals {
+  totalCashSalesAmount: number;
+  totalQrSalesAmount: number;
+  totalSalesAmount: number;
+  expectedCashAmount: number;
+}
+
+export type CurrentCashRegisterSessionResponse = CashRegisterSessionResponse & {
+  liveTotals: CashRegisterLiveTotals;
+};
+
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
 }
@@ -76,18 +93,7 @@ export class CashRegisterService {
         );
       }
 
-      // Solo lo YA pagado: un pedido tardío se vincula a la caja al
-      // aceptarse (antes de cobrarse), así que sin este filtro un cash
-      // todavía impago contaría como plata ya en el cajón.
-      const sums = await trx
-        .selectFrom('orders')
-        .select(['payment_method', sql<string>`coalesce(sum(total_amount), 0)`.as('total')])
-        .where('register_session_id', '=', open.id)
-        .where('payment_status', '=', 'paid')
-        .groupBy('payment_method')
-        .execute();
-      const totalCash = Number(sums.find((s) => s.payment_method === 'cash')?.total ?? 0);
-      const totalQr = Number(sums.find((s) => s.payment_method === 'qr')?.total ?? 0);
+      const { cash: totalCash, qr: totalQr } = await this.sumPaidSales(trx, open.id);
       const expectedCash = Number(open.opening_amount) + totalCash;
       const difference = countedCashAmount - expectedCash;
 
@@ -113,13 +119,46 @@ export class CashRegisterService {
     });
   }
 
-  async getCurrent(): Promise<CashRegisterSessionResponse | null> {
+  async getCurrent(): Promise<CurrentCashRegisterSessionResponse | null> {
     const row = await this.db
       .selectFrom('cash_register_sessions')
       .selectAll()
       .where('status', '=', 'open')
       .executeTakeFirst();
-    return row ? toResponse(row) : null;
+    if (!row) return null;
+
+    const { cash, qr } = await this.sumPaidSales(this.db, row.id);
+    return {
+      ...toResponse(row),
+      liveTotals: {
+        totalCashSalesAmount: cash,
+        totalQrSalesAmount: qr,
+        totalSalesAmount: cash + qr,
+        expectedCashAmount: Number(row.opening_amount) + cash,
+      },
+    };
+  }
+
+  /**
+   * Solo lo YA pagado: un pedido tardío se vincula a la caja al aceptarse
+   * (antes de cobrarse), así que sin este filtro un cash todavía impago
+   * contaría como plata ya en el cajón.
+   */
+  private async sumPaidSales(
+    db: Kysely<Database> | Transaction<Database>,
+    sessionId: string,
+  ): Promise<{ cash: number; qr: number }> {
+    const sums = await db
+      .selectFrom('orders')
+      .select(['payment_method', sql<string>`coalesce(sum(total_amount), 0)`.as('total')])
+      .where('register_session_id', '=', sessionId)
+      .where('payment_status', '=', 'paid')
+      .groupBy('payment_method')
+      .execute();
+    return {
+      cash: Number(sums.find((s) => s.payment_method === 'cash')?.total ?? 0),
+      qr: Number(sums.find((s) => s.payment_method === 'qr')?.total ?? 0),
+    };
   }
 
   async getById(id: string): Promise<CashRegisterSessionResponse> {

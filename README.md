@@ -170,7 +170,10 @@ simulado:
   calcula `expectedCashAmount`/`cashDifference` contra `countedCashAmount`
   y reporta `totalCashSalesAmount`/`totalQrSalesAmount`/`totalSalesAmount`,
   todo calculado y congelado en el momento del cierre (no se recalcula
-  después).
+  después). `GET .../current` agrega `liveTotals` con esas mismas sumas
+  calculadas al vuelo sobre la sesión abierta, para que el POS muestre cómo
+  va la caja durante el turno; los campos congelados de la raíz siguen en
+  `null` hasta cerrar.
 - **`payment-proofs`** — intake completo: idempotencia por
   `source_message_id`, algoritmo de asociación `resolveAssociation` portado
   de saas_smarky (niveles reply_to_qr / candidatos estructurales / ventanas

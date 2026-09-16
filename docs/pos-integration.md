@@ -186,11 +186,30 @@ Si ya hay una caja abierta, da `409 cash_register_already_open`. Antes de
 mostrar el botón de "abrir caja", conviene chequear si ya hay una:
 
 ```
-GET /cash-register/sessions/current   → CashRegisterSession | null
+GET /cash-register/sessions/current   → CashRegisterSession & { liveTotals } | null
 ```
 
 Cualquier rol logueado puede consultar esto (útil para saber si el POS ya
-puede vender). Al cerrar el turno:
+puede vender). Además de la sesión, trae `liveTotals` con cómo va el turno
+**hasta este momento**, para mostrar el estado de la caja en pantalla sin
+esperar al cierre:
+
+```json
+"liveTotals": {
+  "totalCashSalesAmount": 840,
+  "totalQrSalesAmount": 260,
+  "totalSalesAmount": 1100,
+  "expectedCashAmount": 1040
+}
+```
+
+`expectedCashAmount` acá es `openingAmount` + lo cobrado en efectivo hasta
+ahora: es lo que debería haber en el cajón si contaras en este instante. Ojo
+que los campos del mismo nombre **en la raíz** de la sesión abierta siguen en
+`null` — esos son los del arqueo firmado y solo se llenan al cerrar. Usá
+`liveTotals` mientras el turno está abierto y los de la raíz una vez cerrado.
+
+Al cerrar el turno:
 
 ```
 POST /cash-register/sessions/close

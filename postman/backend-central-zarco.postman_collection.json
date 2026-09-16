@@ -70,6 +70,10 @@
     {
       "key": "staffUserId",
       "value": ""
+    },
+    {
+      "key": "cashSessionId",
+      "value": ""
     }
   ],
   "item": [
@@ -883,6 +887,172 @@
                 "operational-settings"
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cash Register",
+      "item": [
+        {
+          "name": "Abrir caja (admin o cashier)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openingAmount\": 200\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/cash-register/sessions/open",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-register",
+                "sessions",
+                "open"
+              ]
+            },
+            "description": "Efectivo con el que arranca el turno. Una sola caja abierta a la vez en todo el local: si ya hay una, da 409 cash_register_already_open. Sin caja abierta no se puede confirmar ningun cobro (ni cash ni QR)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) { pm.collectionVariables.set('cashSessionId', pm.response.json().id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Caja actual (con totales en vivo)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cash-register/sessions/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-register",
+                "sessions",
+                "current"
+              ]
+            },
+            "description": "Devuelve la sesion abierta o null. Trae liveTotals con lo vendido y el esperado HASTA ESTE MOMENTO (los campos congelados de la raiz siguen en null hasta cerrar). Cualquier rol de staff puede consultarlo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.text(); if (b) { const s = pm.response.json(); if (s && s.id) { pm.collectionVariables.set('cashSessionId', s.id); } }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cerrar caja (admin o cashier)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countedCashAmount\": 950,\n  \"notes\": \"cierre de prueba\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/cash-register/sessions/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-register",
+                "sessions",
+                "close"
+              ]
+            },
+            "description": "countedCashAmount es lo que el cajero conto a mano. El backend calcula expectedCashAmount y cashDifference (negativo = falto plata) y los congela: no se recalculan nunca mas. 409 cash_register_not_open si no hay ninguna abierta."
+          }
+        },
+        {
+          "name": "Historial de cajas (admin o cashier)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cash-register/sessions?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-register",
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Cierres pasados, mas recientes primero."
+          }
+        },
+        {
+          "name": "Detalle de una caja",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cash-register/sessions/{{cashSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-register",
+                "sessions",
+                "{{cashSessionId}}"
+              ]
+            },
+            "description": "Para reimprimir el reporte de un cierre."
           }
         }
       ]
