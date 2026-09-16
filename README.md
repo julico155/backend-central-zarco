@@ -103,9 +103,12 @@ simulado:
   `confirmed → preparing` con `409 payment_required` si `payment_status`
   no es `paid` — excepto delivery + `cash`, el único caso real de pago
   contra entrega, donde el repartidor cobra al llegar),
-  `GET /orders` (tablero de cocina, mismo JWT) con filtros + paginación
-  (`limit`/`offset`) — `GET /orders/:id` (un solo pedido) sigue con el
-  token de servicio.
+  `GET /orders` (tablero de cocina/cuadre de caja, rol `kitchen`/
+  `cashier`/`admin`) con filtros (`customer_id`, `status`,
+  `delivery_type`, `payment_status`) + paginación (`limit`/`offset`) —
+  `delivery_type=delivery&payment_status=unpaid` es la cola de "cuadre con
+  las motos" a fin de noche. `GET /orders/:id` (un solo pedido) sigue con
+  el token de servicio o cualquier JWT.
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
   (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
   congelado en la misma transacción). Distancia vía `DistanceService`

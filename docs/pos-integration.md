@@ -199,18 +199,19 @@ pensando en que este mecanismo va a durar.
 
 No hay `card` — no es parte del alcance.
 
-## 6. Tablero de pedidos (cocina)
+## 6. Tablero de pedidos (cocina) y cuadre de caja (cuadre con las motos)
 
-**Requiere rol `kitchen` (o `admin`).** La idea es que cada persona de cocina
-se loguee en la pantalla del tablero, así queda registrado quién movió cada
-pedido.
+**`GET /orders` requiere rol `kitchen`, `cashier` o `admin`.** La idea es
+que cada persona se loguee en su pantalla, así queda registrado quién
+movió cada pedido.
 
 ```
 GET /orders?status=confirmed&limit=50&offset=0
 ```
 
-Filtros: `customer_id` (ojo, **snake_case**, a diferencia de los demás),
-`status`, `limit`, `offset`. Notas del listado:
+Filtros: `customer_id`, `status`, `delivery_type`, `payment_status`
+(todos **snake_case**, a diferencia del resto de la API), `limit`,
+`offset`. Notas del listado:
 
 - Devuelve un **array pelado**: no hay `total` ni `hasMore`. Para saber si hay
   más, pedí `limit + 1` y descartá el extra.
@@ -256,6 +257,35 @@ antes de mandar a cocina. Las transiciones posteriores
 (`preparing → ready → ...`) no vuelven a chequear el pago — si alguien
 cancela el efectivo (`cash/cancel`) después de que ya empezó a prepararse,
 el pedido sigue avanzando igual; marcalo visualmente si eso pasa.
+
+### Cuadre de fin de noche (pantalla de fase 5)
+
+Como delivery + efectivo entra a `preparing` sin estar pagado, en algún
+momento alguien tiene que cerrar esa cuenta con cada repartidor. Es la
+misma API, solo otra combinación de filtros y la misma acción de siempre:
+
+```
+GET /orders?delivery_type=delivery&payment_status=unpaid
+```
+
+Lista los pedidos de delivery todavía sin cobrar (normalmente todos
+`paymentMethod: "cash"` — un QR sin pagar ya está atascado antes de
+`preparing`, no debería llegar hasta acá). Para ver el detalle de uno,
+`GET /orders/:id`. Para marcarlo cobrado cuando el repartidor liquida:
+
+```
+POST /orders/:id/cash/confirm
+```
+
+Es el mismo endpoint que usa el cobro normal — no hay uno separado para
+"cuadre". Es idempotente (llamarlo dos veces no rompe nada) y devuelve el
+pedido actualizado con `paymentStatus: "paid"`. No hay endpoint de "marcar
+varios a la vez" — es uno por uno.
+
+No hay un concepto de "repartidor" en el backend (no hay tabla de motos ni
+se sabe quién entregó cada pedido) — el cuadre es puramente "estos son los
+pedidos delivery+efectivo sin cobrar todavía", el humano hace el
+emparejamiento con quién salió a repartir qué.
 
 `GET /orders/:id` (un solo pedido, no el listado) es para imprimir tickets o
 consultar estado puntual, no para el tablero.

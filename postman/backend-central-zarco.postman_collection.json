@@ -453,7 +453,7 @@
       "name": "Orders",
       "item": [
         {
-          "name": "Listar pedidos (tablero cocina — JWT kitchen/admin)",
+          "name": "Listar pedidos (tablero cocina — JWT kitchen/cashier/admin)",
           "request": {
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{jwtToken}}" }],
@@ -465,10 +465,29 @@
                 { "key": "limit", "value": "20" },
                 { "key": "offset", "value": "0" },
                 { "key": "customer_id", "value": "{{customerId}}", "disabled": true },
-                { "key": "status", "value": "confirmed", "disabled": true }
+                { "key": "status", "value": "confirmed", "disabled": true },
+                { "key": "delivery_type", "value": "delivery", "disabled": true },
+                { "key": "payment_status", "value": "unpaid", "disabled": true }
               ]
             },
-            "description": "El listado (tablero) requiere JWT con rol kitchen o admin — ya no el token de servicio. Correr 'Login (admin)' alcanza para probar."
+            "description": "El listado (tablero) requiere JWT con rol kitchen, cashier o admin — ya no el token de servicio. Correr 'Login (admin)' alcanza para probar."
+          }
+        },
+        {
+          "name": "Cuadre fin de noche: delivery sin cobrar (JWT cashier/admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwtToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders?delivery_type=delivery&payment_status=unpaid",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders"],
+              "query": [
+                { "key": "delivery_type", "value": "delivery" },
+                { "key": "payment_status", "value": "unpaid" }
+              ]
+            },
+            "description": "Pantalla de fin de noche: pedidos de delivery pagados en efectivo (pago contra entrega) que el repartidor todavía no liquidó. Para marcar uno cobrado, usar 'Confirmar pago en efectivo' sobre ese orderId — es el mismo endpoint que el cobro normal, no hay uno separado para cuadre."
           }
         },
         {

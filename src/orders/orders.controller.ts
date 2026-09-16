@@ -22,7 +22,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentStaffUser } from '../auth/current-staff-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
-import { OrderStatus } from '../database/types';
+import { OrderDeliveryType, OrderPaymentStatus, OrderStatus } from '../database/types';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AttachLocationDto } from './dto/attach-location.dto';
@@ -39,24 +39,33 @@ export class OrdersController {
     return this.orders.findById(id);
   }
 
-  // Tablero de cocina: login de staff (JWT), no el bearer estático del POS
-  // — así queda registrado qué persona movió cada pedido (status_updated_by).
+  // Tablero de cocina (status/limit/offset) y cuadre de caja de fin de
+  // noche con las motos (delivery_type=delivery&payment_status=unpaid, ver
+  // docs/pos-integration.md) — login de staff (JWT), no el bearer estático
+  // del POS, así queda registrado qué persona movió cada pedido
+  // (status_updated_by).
   @Get('orders')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('kitchen', 'admin')
+  @Roles('kitchen', 'cashier', 'admin')
   @ApiQuery({ name: 'customer_id', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'delivery_type', required: false, type: String })
+  @ApiQuery({ name: 'payment_status', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   findMany(
     @Query('customer_id') customerId?: string,
     @Query('status') status?: OrderStatus,
+    @Query('delivery_type') deliveryType?: OrderDeliveryType,
+    @Query('payment_status') paymentStatus?: OrderPaymentStatus,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     return this.orders.findMany({
       customerId,
       status,
+      deliveryType,
+      paymentStatus,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });

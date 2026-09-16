@@ -6,6 +6,7 @@ import {
   OrderChannel,
   OrderDeliveryType,
   OrderPaymentMethod,
+  OrderPaymentStatus,
   OrderPromotionComponentSnapshot,
   OrderStatus,
 } from '../database/types';
@@ -134,12 +135,16 @@ export class OrdersService {
   async findMany(filter: {
     customerId?: string;
     status?: OrderStatus;
+    deliveryType?: OrderDeliveryType;
+    paymentStatus?: OrderPaymentStatus;
     limit?: number;
     offset?: number;
   }): Promise<OrderResponse[]> {
     let query = this.db.selectFrom('orders').selectAll();
     if (filter.customerId) query = query.where('customer_id', '=', filter.customerId);
     if (filter.status) query = query.where('status', '=', filter.status);
+    if (filter.deliveryType) query = query.where('delivery_type', '=', filter.deliveryType);
+    if (filter.paymentStatus) query = query.where('payment_status', '=', filter.paymentStatus);
     const orders = await query
       .orderBy('created_at', 'desc')
       .limit(Math.min(filter.limit ?? 50, 200))
