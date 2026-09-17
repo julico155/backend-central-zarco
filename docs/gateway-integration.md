@@ -68,8 +68,8 @@ Idempotency-Key: <uuid único por intento — SIEMPRE, ver nota abajo>
 
 Respuestas posibles:
 - **200/201** — pedido creado. `200` si repetiste la misma `Idempotency-Key` con el mismo cuerpo (no se duplicó, te devuelve el mismo pedido de antes).
-- **202** — fuera del horario normal pero dentro de la ventana de revisión nocturna: el pedido queda pendiente de que un humano lo acepte (`late_order_request`). Avísale al cliente que su pedido está "en revisión".
-- **409 `closed`** — local cerrado, no se puede pedir.
+- **202** — el pedido queda pendiente de que un humano lo acepte (`late_order_request`). Pasa cada vez que no hay staff con la caja abierta en ese momento — puede ser tarde en la noche, pero también temprano si todavía no abrieron, o si cerraron antes de lo habitual esa noche en particular (el horario real varía). Avísale al cliente que su pedido está "en revisión", nunca que está confirmado — vence solo a los 10 minutos si nadie lo revisa.
+- **409 `closed`** — fuera de cualquier horario plausible del local (ej. de madrugada/mañana), no se puede pedir.
 - **409 `product_unavailable`** / **`promotion_unavailable`** — algo del carrito ya no está disponible; el `details` trae qué producto/promo fue.
 
 **Sobre `Idempotency-Key`**: generá un UUID nuevo por cada intento REAL del usuario de confirmar su pedido, y **reusá el mismo UUID** si estás reintentando la misma request por un timeout/error de red — así nunca se duplica el pedido. No generes uno nuevo en cada reintento automático.

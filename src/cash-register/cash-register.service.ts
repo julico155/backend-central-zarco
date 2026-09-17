@@ -139,6 +139,16 @@ export class CashRegisterService {
     };
   }
 
+  /** Usado por el gate de horario (checkoutGateAt): si hay caja abierta, un pedido dentro del margen horario se confirma directo; si no, se encola. */
+  async isOpen(): Promise<boolean> {
+    const open = await this.db
+      .selectFrom('cash_register_sessions')
+      .select('id')
+      .where('status', '=', 'open')
+      .executeTakeFirst();
+    return open !== undefined;
+  }
+
   /**
    * Solo lo YA pagado: un pedido tardío se vincula a la caja al aceptarse
    * (antes de cobrarse), así que sin este filtro un cash todavía impago

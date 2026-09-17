@@ -32,12 +32,6 @@ export class UpdateOperationalSettingsDto {
   businessClosesHour?: number;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(23)
-  lateReviewClosesHour?: number;
-
-  @IsOptional()
   @IsLatitude()
   restaurantLatitude?: number;
 

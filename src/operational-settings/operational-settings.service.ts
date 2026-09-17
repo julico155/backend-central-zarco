@@ -7,9 +7,9 @@ import { UpdateOperationalSettingsDto } from './dto/update-operational-settings.
 export interface OperationalSettingsResponse {
   rainSurchargeEnabled: boolean;
   rainSurchargeAmount: number;
+  /** Margen ancho de cordura, no el horario preciso — ver comentario en OperationalSettingsTable. */
   businessOpensHour: number;
   businessClosesHour: number;
-  lateReviewClosesHour: number;
   restaurantLatitude: number | null;
   restaurantLongitude: number | null;
 }
@@ -54,9 +54,6 @@ export class OperationalSettingsService {
         ...(dto.businessClosesHour !== undefined
           ? { business_closes_hour: dto.businessClosesHour }
           : {}),
-        ...(dto.lateReviewClosesHour !== undefined
-          ? { late_review_closes_hour: dto.lateReviewClosesHour }
-          : {}),
         ...(dto.restaurantLatitude !== undefined
           ? { restaurant_latitude: dto.restaurantLatitude }
           : {}),
@@ -77,7 +74,6 @@ function toResponse(row: {
   rain_surcharge_amount: string;
   business_opens_hour: number;
   business_closes_hour: number;
-  late_review_closes_hour: number;
   restaurant_latitude: number | null;
   restaurant_longitude: number | null;
 }): OperationalSettingsResponse {
@@ -86,7 +82,6 @@ function toResponse(row: {
     rainSurchargeAmount: Number(row.rain_surcharge_amount),
     businessOpensHour: row.business_opens_hour,
     businessClosesHour: row.business_closes_hour,
-    lateReviewClosesHour: row.late_review_closes_hour,
     restaurantLatitude: row.restaurant_latitude,
     restaurantLongitude: row.restaurant_longitude,
   };

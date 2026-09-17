@@ -876,7 +876,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"restaurantLatitude\": -16.5,\n  \"restaurantLongitude\": -68.15,\n  \"rainSurchargeEnabled\": false,\n  \"businessOpensHour\": 17,\n  \"businessClosesHour\": 22,\n  \"lateReviewClosesHour\": 23\n}"
+              "raw": "{\n  \"restaurantLatitude\": -16.5,\n  \"restaurantLongitude\": -68.15,\n  \"rainSurchargeEnabled\": false,\n  \"businessOpensHour\": 17,\n  \"businessClosesHour\": 23\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/operational-settings",
@@ -1241,7 +1241,7 @@
                 "orders"
               ]
             },
-            "description": "Sin bypass: si el local está cerrado ahora mismo (fuera de 17-23 hora La Paz), da 409 'closed', o 202 (late_order_request) en la ventana 22-23. Usá la request 'pickup, canal POS' para probar sin depender del horario."
+            "description": "Sin bypass: si el local está cerrado ahora mismo (fuera del margen 17-23 hora La Paz), da 409 'closed'. Adentro del margen, si no hay caja abierta (POST /cash-register/sessions/open) da 202 (late_order_request) en vez de crear el pedido directo. Usá la request 'pickup, canal POS' para probar sin depender del horario ni de la caja."
           }
         },
         {

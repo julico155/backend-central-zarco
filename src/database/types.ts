@@ -284,13 +284,20 @@ export interface OrderPromotionsTable {
   components_snapshot: JSONColumnType<OrderPromotionComponentSnapshot[]>;
 }
 
+/**
+ * business_opens_hour/business_closes_hour son ahora un margen ANCHO de
+ * cordura, no el límite preciso de apertura/cierre (el horario real no es
+ * fijo) — el gate de horario los usa solo para descartar de una un mensaje
+ * claramente fuera de cualquier horario plausible. Adentro de ese margen,
+ * la caja abierta/cerrada decide si el pedido pasa directo o se encola para
+ * revisión humana. Ver checkoutGateAt en common/time/service-window.ts.
+ */
 export interface OperationalSettingsTable {
   id: true;
   rain_surcharge_enabled: Generated<boolean>;
   rain_surcharge_amount: Generated<string>;
   business_opens_hour: Generated<number>;
   business_closes_hour: Generated<number>;
-  late_review_closes_hour: Generated<number>;
   restaurant_latitude: number | null;
   restaurant_longitude: number | null;
   updated_at: Timestamp;

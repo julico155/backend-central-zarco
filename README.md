@@ -103,11 +103,15 @@ simulado:
   storage intercambiable (S3/R2 o disco local) que `payment-proofs`,
   reusando el mismo bucket.
 - **`orders`** — `POST /orders` porta `create_order_web_v5` (saas_smarky)
-  completo: gate de horario (`business_opens_hour`/`business_closes_hour`/
-  `late_review_closes_hour` en `operational_settings`, hora de La Paz —
-  el turno puede cruzar medianoche, ej. 19 a 4: las comparaciones son
-  relativas a la apertura, no horas absolutas del día — ver
-  `common/time/service-window.ts`), `Idempotency-Key` genérica reemplazando
+  completo: gate de horario en dos capas, porque el horario real no es fijo
+  (varía ±1h noche a noche). `business_opens_hour`/`business_closes_hour`
+  en `operational_settings` (hora de La Paz, el turno puede cruzar
+  medianoche — ej. 19 a 4, comparado relativo a la apertura, no horas
+  absolutas del día) son solo un margen ANCHO de cordura para descartar de
+  una un mensaje fuera de cualquier horario plausible (ej. cerrado 6am-4pm).
+  Adentro de ese margen, la caja abierta (`cash-register`, abajo) decide si
+  el pedido se confirma directo o se encola (`late_order_requests`) — ver
+  `common/time/service-window.ts`. `Idempotency-Key` genérica reemplazando
   sesión+fingerprint, recálculo de precios/disponibilidad en servidor,
   snapshot de productos y combos, `product_unavailable` vs
   `promotion_unavailable`. Más `location` (dispara cotización de delivery),
@@ -197,12 +201,13 @@ simulado:
 
 ## Qué falta / deuda conocida
 
-- **Horario real todavía no cargado**: `operational_settings` sigue con los
-  valores por defecto de la migración (17/22/23). El horario real del local
-  (19 a 4, cruza medianoche) hay que cargarlo con
-  `PATCH /operational-settings` — el gate ya soporta turnos que cruzan
-  medianoche (ver `orders` arriba), así que es solo cuestión de configurar
-  las horas correctas, no falta código.
+- **Margen horario real todavía no cargado**: `operational_settings` sigue
+  con los valores por defecto (`business_opens_hour: 17`,
+  `business_closes_hour: 23`). El margen ancho real (ej. cerrado 6am-4pm,
+  ver `orders` arriba) hay que cargarlo con `PATCH /operational-settings` —
+  solo dos valores ahora, no hace falta que sean precisos, el gate ya soporta
+  turnos que cruzan medianoche y la caja hace el trabajo fino adentro del
+  margen.
 - **Pago con QR bancario**: pendiente a propósito (dependencia externa aún
   no definida). El plan menciona una integración próxima con una API de
   banco. Hoy `payment_method: 'qr'` asume comprobante manual (foto) vía

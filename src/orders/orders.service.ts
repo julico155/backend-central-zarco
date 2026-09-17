@@ -181,11 +181,14 @@ export class OrdersService {
 
   /**
    * POST /orders. Gate de horario evaluado ANTES que todo lo demás
-   * (invariante 7): cerrado -> 409; late_review -> 202 + late_order_requests
-   * (no consume la Idempotency-Key genérica, usa la suya propia como
-   * columna única, igual que delivery_quote_requests). `bypassHoursGate`
-   * solo se honra para channel='pos' (decisión de producto — POS puede
-   * vender fuera del horario de delivery de WhatsApp).
+   * (invariante 7): afuera del margen horario -> 409 cerrado; adentro, la
+   * caja decide (ver checkoutGateAt) -> sin caja abierta, 202 +
+   * late_order_requests (no consume la Idempotency-Key genérica, usa la
+   * suya propia como columna única, igual que delivery_quote_requests).
+   * `bypassHoursGate` solo se honra para channel='pos' (decisión de
+   * producto — POS puede vender fuera del horario de delivery de WhatsApp,
+   * y de la caja: el mostrador vende sin necesitar sesión de caja abierta
+   * para simplemente CREAR el pedido, aunque cobrarlo sí la va a exigir).
    */
   async create(
     dto: CreateOrderDto,
@@ -197,11 +200,11 @@ export class OrdersService {
     const bypassAllowed = dto.bypassHoursGate === true && dto.channel === 'pos';
     const gate = bypassAllowed
       ? ({ gate: 'proceed' } as const)
-      : checkoutGateAt(now, {
-          opensHour: settings.business_opens_hour,
-          lateReviewHour: settings.business_closes_hour,
-          closesHour: settings.late_review_closes_hour,
-        });
+      : checkoutGateAt(
+          now,
+          { opensHour: settings.business_opens_hour, closesHour: settings.business_closes_hour },
+          await this.cashRegister.isOpen(),
+        );
 
     if (gate.gate === 'closed') {
       throw new StoreClosedError();

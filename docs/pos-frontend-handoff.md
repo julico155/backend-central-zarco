@@ -114,10 +114,14 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   nada (reintentable). Ojo: un pedido tardío en efectivo queda vinculado y
   puede seguir `unpaid` un rato hasta que alguien haga `cash/confirm` — no
   cuenta en el cierre hasta ese momento.
-- **El horario ahora puede cruzar medianoche** (el local real atiende 19 a
-  4). El gate ya lo soporta — no es nada que el front tenga que manejar
-  distinto, solo tené presente que `bypassHoursGate: true` sigue siendo
-  obligatorio para el POS como siempre.
+- **El horario del gate ahora es solo un margen ancho de cordura** (ej.
+  cerrado 6am-4pm), no el límite preciso — el horario real varía noche a
+  noche, así que adentro de ese margen es la **caja** la que decide si un
+  pedido se confirma directo o se encola. No afecta al POS (siempre manda
+  `bypassHoursGate: true` como siempre, crea el pedido sin importar la
+  caja), pero si el tablero también muestra pedidos de WhatsApp podés ver
+  aparecer `late_order_requests` en horarios que no son "de madrugada" —
+  es esperable, significa que la caja no estaba abierta en ese momento.
 - **`status_conflict` (409) ≠ `invalid_state_transition` (409)**: el primero
   es una carrera entre dos pantallas de cocina (CAS optimista) — refrescar y
   reintentar, no mostrar error rojo. El segundo es un salto de estado ilegal.
