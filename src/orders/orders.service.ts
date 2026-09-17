@@ -225,7 +225,77 @@ export class OrdersService {
       execute: (trx) => this.executeCreateOrder(trx, dto),
     });
 
+    // Fuera de la transacción a propósito: notifyOrderCreated hace una
+    // lectura propia del pedido (otra conexión) y, para QR, una llamada HTTP
+    // al banco — si corriera adentro del trx de arriba, la lectura no vería
+    // el INSERT todavía sin commitear ("order no existe"), y la llamada
+    // externa quedaría sosteniendo la transacción abierta. Solo en una
+    // creación real (no en una respuesta cacheada de un reintento).
+    if (outcome.created) {
+      this.notifyOrderCreated(outcome.body).catch((error: Error) =>
+        this.logger.warn(`notifyOrderCreated falló para ${outcome.body.id}: ${error.message}`),
+      );
+    }
+
     return { httpStatus: outcome.created ? 201 : 200, body: outcome.body };
+  }
+
+  private async notifyOrderCreated(order: OrderResponse): Promise<void> {
+    if (!order.customerId) return;
+
+    try {
+      await this.notifications.notifyNow({
+        channel: 'whatsapp',
+        kind: 'order_received',
+        targetRef: order.id,
+        payload: {
+          customerId: order.customerId,
+          text: `Recibimos tu pedido ${order.orderNumber}.`,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo notificar order_received para ${order.id}: ${(error as Error).message}`,
+      );
+    }
+
+    // El external_message_id de ESTE envío es lo que PaymentProofsService
+    // usa para "reply_to_qr" (invariante de asociación nivel 1) — se sigue
+    // mandando bajo el mismo kind 'qr_confirmation' así ese matching no se
+    // toca, cambia solo el contenido: ahora manda el QR real del banco en
+    // vez de pedir una captura. Si el banco falla, cae al texto de pedir
+    // captura como estaba antes (fallback, no rompe la creación del pedido).
+    if (order.paymentMethod === 'qr') {
+      let payload: { customerId: string; text: string; imageUrl?: string };
+      try {
+        const charge = await this.qrPayments.generateForOrder(order.id);
+        payload = {
+          customerId: order.customerId,
+          text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
+          imageUrl: charge.qrImageUrl,
+        };
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo generar el QR real para ${order.id}, cae a texto: ${(error as Error).message}`,
+        );
+        payload = {
+          customerId: order.customerId,
+          text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
+        };
+      }
+      try {
+        await this.notifications.notifyNow({
+          channel: 'whatsapp',
+          kind: 'qr_confirmation',
+          targetRef: order.id,
+          payload,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo notificar qr_confirmation para ${order.id}: ${(error as Error).message}`,
+        );
+      }
+    }
   }
 
   private async executeCreateOrder(
@@ -246,62 +316,6 @@ export class OrdersService {
         revision: p.revision,
       })),
     });
-
-    if (order.customerId) {
-      try {
-        await this.notifications.notifyNow({
-          channel: 'whatsapp',
-          kind: 'order_received',
-          targetRef: order.id,
-          payload: {
-            customerId: order.customerId,
-            text: `Recibimos tu pedido ${order.orderNumber}.`,
-          },
-        });
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo notificar order_received para ${order.id}: ${(error as Error).message}`,
-        );
-      }
-
-      // El external_message_id de ESTE envío es lo que PaymentProofsService
-      // usa para "reply_to_qr" (invariante de asociación nivel 1) — se sigue
-      // mandando bajo el mismo kind 'qr_confirmation' así ese matching no se
-      // toca, cambia solo el contenido: ahora manda el QR real del banco en
-      // vez de pedir una captura. Si el banco falla, cae al texto de pedir
-      // captura como estaba antes (fallback, no rompe la creación del pedido).
-      if (order.paymentMethod === 'qr') {
-        let payload: { customerId: string; text: string; imageUrl?: string };
-        try {
-          const charge = await this.qrPayments.generateForOrder(order.id);
-          payload = {
-            customerId: order.customerId,
-            text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
-            imageUrl: charge.qrImageUrl,
-          };
-        } catch (error) {
-          this.logger.warn(
-            `No se pudo generar el QR real para ${order.id}, cae a texto: ${(error as Error).message}`,
-          );
-          payload = {
-            customerId: order.customerId,
-            text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
-          };
-        }
-        try {
-          await this.notifications.notifyNow({
-            channel: 'whatsapp',
-            kind: 'qr_confirmation',
-            targetRef: order.id,
-            payload,
-          });
-        } catch (error) {
-          this.logger.warn(
-            `No se pudo notificar qr_confirmation para ${order.id}: ${(error as Error).message}`,
-          );
-        }
-      }
-    }
 
     return { status: 201, body: order };
   }
