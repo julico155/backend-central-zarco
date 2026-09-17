@@ -12,18 +12,25 @@ import { QrPaymentsService } from './qr-payments.service';
 @Injectable()
 export class QrPaymentsPollCron {
   private readonly logger = new Logger(QrPaymentsPollCron.name);
+  private isRunning = false;
 
   constructor(private readonly qrPayments: QrPaymentsService) {}
 
-  @Cron(CronExpression.EVERY_30_SECONDS)
+  @Cron(CronExpression.EVERY_5_SECONDS)
   async run(): Promise<void> {
-    const qrIds = await this.qrPayments.findPendingQrIds(20);
-    for (const qrId of qrIds) {
-      try {
-        await this.qrPayments.resolveCharge(qrId);
-      } catch (error) {
-        this.logger.warn(`resolveCharge falló para ${qrId}: ${(error as Error).message}`);
+    if (this.isRunning) return;
+    this.isRunning = true;
+    try {
+      const qrIds = await this.qrPayments.findPendingQrIds(20);
+      for (const qrId of qrIds) {
+        try {
+          await this.qrPayments.resolveCharge(qrId);
+        } catch (error) {
+          this.logger.warn(`resolveCharge falló para ${qrId}: ${(error as Error).message}`);
+        }
       }
+    } finally {
+      this.isRunning = false;
     }
   }
 }

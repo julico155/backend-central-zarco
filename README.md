@@ -202,7 +202,7 @@ simulado:
   vínculo a caja y la notificación al cliente que ya existían. Como el banco
   no validó todavía `notifyPaymentQR` (su propio manual lo marca
   "pendiente"), el mecanismo principal es un cron (`QrPaymentsPollCron`,
-  cada 30s) que usa `statusQR` — sí validado — sobre cada QR pendiente; el
+  cada 5s) que usa `statusQR` — sí validado — sobre cada QR pendiente; el
   endpoint de webhook (`POST /bank/baneco/webhook/notify-payment`) existe
   pero solo dispara esa misma re-verificación, nunca confía en el body
   (todavía no hay forma documentada de autenticar al banco de ese lado).

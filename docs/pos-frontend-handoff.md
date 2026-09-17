@@ -80,7 +80,7 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   Bearer` de siempre (nunca Base64 crudo en el JSON). Es idempotente:
   llamarlo de nuevo para el mismo pedido devuelve el mismo QR, no genera
   otro. La confirmación es **automática** — el backend consulta al banco
-  solo cada ~30s — así que el POS solo necesita mostrar el QR y hacer
+  solo cada ~5s — así que el POS solo necesita mostrar el QR y hacer
   polling de `GET /orders/:id` hasta ver `paymentStatus: 'paid'`, mismo
   patrón que el resto del tablero. Si tarda o el banco está caído, hay un
   fallback manual: `POST /orders/:id/payment-attempts/confirm-presencial`

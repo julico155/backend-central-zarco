@@ -271,10 +271,10 @@ que la foto de producto. Es **idempotente**: llamarlo dos veces para el
 mismo pedido devuelve el mismo QR ya generado, no crea uno nuevo.
 
 La confirmación del pago es **automática**: el backend consulta al banco
-cada ~30s (`statusQR`) y en cuanto detecta el pago marca
+cada ~5s (`statusQR`) y en cuanto detecta el pago marca
 `orders.payment_status: 'paid'` solo — no hace falta que el POS haga nada
-más que esperar (polling de `GET /orders/:id` cada 5-10s, igual que el resto
-del tablero, para saber cuándo pasó). Sin caja abierta, ni siquiera se puede
+más que esperar (polling de `GET /orders/:id` cada 3-5s mientras el QR está
+en pantalla, para que la confirmación se sienta casi instantánea). Sin caja abierta, ni siquiera se puede
 generar el QR — mismo `409 cash_register_closed` que el resto de los cobros.
 
 **Fallback manual** — si la confirmación automática tarda o el banco está
