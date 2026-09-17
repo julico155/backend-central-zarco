@@ -177,6 +177,30 @@ export interface PaymentAttemptsTable {
   updated_at: Timestamp;
 }
 
+export type BankQrChargeStatus = 'pending' | 'confirmed' | 'cancelled' | 'expired';
+
+/**
+ * QR real de Banco Económico, 1 a 1 con un payment_attempt (el que ya trae
+ * el CAS de decide(), el vínculo a caja y la notificación al cliente — acá
+ * solo vive el detalle bancario que ese modelo no necesita conocer).
+ */
+export interface BankQrChargesTable {
+  id: Generated<string>;
+  order_id: string;
+  payment_attempt_id: string;
+  qr_id: string;
+  transaction_id: string;
+  amount: string;
+  due_date: ColumnType<string, string, string>;
+  status: Generated<BankQrChargeStatus>;
+  qr_image_base64: string;
+  raw_generate_response: JSONColumnType<Record<string, unknown>> | null;
+  raw_status_response: JSONColumnType<Record<string, unknown>> | null;
+  raw_notify_payload: JSONColumnType<Record<string, unknown>> | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export type CashRegisterSessionStatus = 'open' | 'closed';
 
 /**
@@ -346,6 +370,7 @@ export interface Database {
   delivery_quote_requests: DeliveryQuoteRequestsTable;
   payment_attempts: PaymentAttemptsTable;
   payment_proofs: PaymentProofsTable;
+  bank_qr_charges: BankQrChargesTable;
   promotions: PromotionsTable;
   promotion_items: PromotionItemsTable;
   order_promotions: OrderPromotionsTable;

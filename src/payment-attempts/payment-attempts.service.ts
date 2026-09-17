@@ -100,18 +100,31 @@ export class PaymentAttemptsService {
   }
 
   /**
-   * Cobro presencial en el POS: el cliente muestra el QR pagado ahí mismo,
-   * un cajero lo revisa a simple vista y decide en el momento — no hay foto
-   * ni `payment-proofs` de por medio. A diferencia de `decide()`, acá el
-   * `payment_attempt` se crea y se decide en el mismo paso (nunca pasa por
-   * 'pending_review'); el índice único parcial `uq_payment_attempts_live`
-   * igual protege de abrir un segundo intento si ya hay uno vivo (por
-   * ejemplo, uno pendiente por foto que llegó justo antes).
+   * Cobro presencial en el POS: el cajero decide en el momento (a ojo, o
+   * porque la confirmación automática del banco todavía no llegó — ver
+   * `QrPaymentsService`). Si ya hay un `payment_attempt` vivo para el pedido
+   * (lo normal: `QrPaymentsService.generateForOrder` ya lo dejó en
+   * 'pending_review' al generar el QR real), decide sobre ESE en vez de
+   * insertar uno nuevo — reusa el mismo CAS de `decide()`, cero duplicación.
+   * Solo si no hay ninguno (banco caído, nunca se generó QR real) cae al
+   * comportamiento original: crear y decidir en el mismo paso. El índice
+   * único parcial `uq_payment_attempts_live` sigue siendo la última barrera
+   * contra un segundo intento vivo en cualquiera de los dos casos.
    */
   async confirmPresencial(
     orderId: string,
     decision: 'accepted' | 'rejected',
   ): Promise<DecidePaymentAttemptResult> {
+    const existingLive = await this.db
+      .selectFrom('payment_attempts')
+      .select('id')
+      .where('order_id', '=', orderId)
+      .where('review_status', '=', 'pending_review')
+      .executeTakeFirst();
+    if (existingLive) {
+      return this.decide(existingLive.id, decision);
+    }
+
     const result = await this.db.transaction().execute(async (trx) => {
       const order = await trx
         .selectFrom('orders')

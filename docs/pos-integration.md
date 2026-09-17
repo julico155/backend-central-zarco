@@ -255,35 +255,42 @@ Devuelven el pedido completo actualizado. `cash/confirm` sin caja abierta da
 `409 cash_register_closed` (ver sección 5). `cash/cancel` desvincula el
 pedido de la caja (si el turno sigue abierto, ya no cuenta para el cierre).
 
-### QR presencial (cliente paga en el mostrador)
-El cliente muestra el QR y paga ahí mismo — no hay foto ni
-`payment-proofs` de por medio, un cajero revisa a simple vista y confirma
-en el momento. Requiere rol `cashier` o `admin`:
+### QR real (Banco Económico)
+
+El cajero genera un QR real del banco para que el cliente lo escanee desde
+su propia app bancaria — rol `cashier` o `admin`:
+
+```
+POST /orders/:id/qr/generate
+→ { "orderId", "status": "pending", "qrImageUrl": "/orders/:id/qr-image", "dueDate" }
+```
+
+`qrImageUrl` es una ruta relativa (nunca el Base64 crudo ni una URL directa
+del banco) — pedila con el mismo `Authorization: Bearer` de siempre, igual
+que la foto de producto. Es **idempotente**: llamarlo dos veces para el
+mismo pedido devuelve el mismo QR ya generado, no crea uno nuevo.
+
+La confirmación del pago es **automática**: el backend consulta al banco
+cada ~30s (`statusQR`) y en cuanto detecta el pago marca
+`orders.payment_status: 'paid'` solo — no hace falta que el POS haga nada
+más que esperar (polling de `GET /orders/:id` cada 5-10s, igual que el resto
+del tablero, para saber cuándo pasó). Sin caja abierta, ni siquiera se puede
+generar el QR — mismo `409 cash_register_closed` que el resto de los cobros.
+
+**Fallback manual** — si la confirmación automática tarda o el banco está
+caído, el cajero puede confirmar a ojo (vio la notificación de pago en su
+propio celular, por ejemplo):
 
 ```
 POST /orders/:id/payment-attempts/confirm-presencial
 { "decision": "accepted" | "rejected" }
 ```
 
-El `:id` es el **id del pedido**, no el del intento de pago. Igual que el
-cobro en efectivo, sin caja abierta da `409 cash_register_closed` — salvo
-que el pedido ya haya venido etiquetado a una caja (los pedidos fuera de
-horario se etiquetan al aceptarse, sección 8).
-
-⚠️ A diferencia de los endpoints de efectivo, este **no devuelve el pedido**
-sino `{ attempt, won }`. Si necesitás el pedido actualizado para el ticket,
-hacé `GET /orders/:id` después.
-
-Si `accepted`, `orders.payment_status` pasa a `paid` en el momento. Si ya
-había otro intento vivo para ese pedido (por ejemplo, llegó una foto por
-WhatsApp justo antes), da `409 payment_attempt_already_live` — no debería
-pasar en el flujo normal de mostrador, pero si pasa, revisen
-`GET /orders/:id/payment-attempts` para ver qué hay pendiente.
-
-Esto es provisorio: pronto se integra una API de banco para QR real
-(confirmación automática) — cuando esté, este endpoint probablemente deje
-de necesitar la revisión manual del cajero. No construyan nada permanente
-pensando en que este mecanismo va a durar.
+El `:id` es el **id del pedido**, no el del intento de pago. Si ya había un
+intento vivo (lo normal, dejado por `qr/generate`), decide sobre ese en vez
+de crear uno nuevo. ⚠️ A diferencia de los endpoints de efectivo, este **no
+devuelve el pedido** sino `{ attempt, won }` — pedí `GET /orders/:id`
+después si necesitás el pedido actualizado para el ticket.
 
 No hay `card` — no es parte del alcance.
 

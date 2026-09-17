@@ -73,10 +73,19 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   201 = venta nueva, 200 = respuesta cacheada (reimpresión, no recobro).
 - **`bypassHoursGate: true` siempre**, junto con `channel: "pos"`,
   `deliveryType: "pickup"`.
-- **Cobro QR presencial** (`POST /orders/:id/payment-attempts/confirm-presencial`)
-  no devuelve el pedido, devuelve `{attempt, won}` — hacé `GET /orders/:id`
-  después si necesitás el pedido actualizado para el ticket. Requiere rol
-  `cashier` o `admin`. Es provisorio (viene una integración de banco real).
+- **Cobro QR real** (Banco Económico): `POST /orders/:id/qr/generate` (rol
+  `cashier`/`admin`, exige caja abierta) devuelve
+  `{orderId, status, qrImageUrl, dueDate}` — `qrImageUrl` es una ruta
+  relativa (`/orders/:id/qr-image`), pedila con el mismo `Authorization:
+  Bearer` de siempre (nunca Base64 crudo en el JSON). Es idempotente:
+  llamarlo de nuevo para el mismo pedido devuelve el mismo QR, no genera
+  otro. La confirmación es **automática** — el backend consulta al banco
+  solo cada ~30s — así que el POS solo necesita mostrar el QR y hacer
+  polling de `GET /orders/:id` hasta ver `paymentStatus: 'paid'`, mismo
+  patrón que el resto del tablero. Si tarda o el banco está caído, hay un
+  fallback manual: `POST /orders/:id/payment-attempts/confirm-presencial`
+  (no devuelve el pedido, devuelve `{attempt, won}` — pedí `GET /orders/:id`
+  después para el ticket).
 - **`GET /orders` (tablero, rol `kitchen`/`cashier`/`admin`)**: filtros
   `customer_id`, `status`, `delivery_type`, `payment_status` (todos
   snake_case). Array pelado sin `total`. `limit` se recorta a 200 en
@@ -156,14 +165,18 @@ activado en todas las tablas de Supabase, seed del primer admin
 `promotions[]`, fotos de producto (S3/R2 o disco local, migración aplicada),
 filtros `delivery_type`/`payment_status` en `GET /orders`, gate de
 `payment_required` con la excepción de delivery+cash, límite de body subido a
-10MB, horario cruzando medianoche, y caja (turno) — apertura/cierre,
+10MB, horario cruzando medianoche, caja (turno) — apertura/cierre,
 vinculación de pedidos al cobrarse (o al aceptarse si son fuera de horario),
-cierre con reporte cash/QR/total. Todo probado end-to-end contra el backend
-real: login, catálogo con JWT, crear pedido con combo, idempotencia con
-reintento, cobro en efectivo, subida y descarga de foto de producto — cuadró
-todo. La caja específicamente: pendiente de verificar contra producción
-(recién implementada), revisá con el repo del backend si tenés dudas de que
-algo no calce con lo documentado acá.
+cierre con reporte cash/QR/total — y QR real de Banco Económico
+(`POST /orders/:id/qr/generate` + confirmación automática por polling al
+banco, sección de arriba). Todo probado end-to-end contra el backend real:
+login, catálogo con JWT, crear pedido con combo, idempotencia con reintento,
+cobro en efectivo, subida y descarga de foto de producto, horario/caja —
+cuadró todo. El QR real específicamente: el banco solo validó
+`generateQR`/`statusQR`/`cancelQR` en certificación, `statusQrCode = 1`
+(pago real) todavía no — así que hasta que el banco habilite esa prueba, la
+confirmación automática está construida pero sin poder verificarse de punta
+a punta contra un pago real.
 
 Auto-deploy activo: un push a `master` en GitHub redespliega solo en Railway
 (las migraciones **no** corren solas — si alguien agrega una migración nueva,

@@ -87,7 +87,21 @@ por calle, tarifa, recargo por lluvia si aplica). La respuesta trae el
 pedido actualizado con `totalAmount` ya con el delivery incluido — ahí es
 cuando le confirmás el total final al cliente.
 
-### 2.5 Comprobante de pago (QR)
+### 2.5 Pago QR
+
+Para pedidos con `paymentMethod: "qr"`, el backend genera un QR real del
+banco apenas se crea el pedido y te lo manda solo, como un mensaje normal
+(`POST /gateway/whatsapp/messages` con `imageUrl`) — no hace falta que el
+agente pida nada. La confirmación del pago también es automática (el
+backend consulta al banco solo); cuando se confirma, el agente recibe otro
+mensaje saliente normal avisándole al cliente.
+
+Si por algún motivo el banco falla al generar el QR, el backend cae a pedir
+la captura como antes (mismo mecanismo de `payment-proofs` de abajo) — el
+agente no necesita distinguir un caso del otro, ambos llegan como mensajes
+salientes normales.
+
+#### Comprobante de pago (fallback si el cliente paga por fuera y manda foto igual)
 
 Cuando el cliente manda la foto del comprobante:
 

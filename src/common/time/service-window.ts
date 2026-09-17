@@ -93,6 +93,11 @@ export function checkoutGateAt(
   return cashRegisterOpen ? { gate: 'proceed' } : { gate: 'late_review' };
 }
 
+/** Fecha calendario en Bolivia, formato YYYY-MM-DD — usado para `dueDate` del QR bancario. */
+export function dateInBolivia(instant: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: SERVICE_TIME_ZONE }).format(instant);
+}
+
 export const LATE_REQUEST_TTL_MS = 10 * 60 * 1000; // 10 minutos, igual que el proyecto viejo
 
 export function lateRequestExpiryFor(instant: Date): Date {

@@ -25,6 +25,7 @@ import { OperationalSettingsService } from '../operational-settings/operational-
 import { DeliveryService } from '../delivery/delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
+import { QrPaymentsService } from '../bank-qr/qr-payments.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 export interface OrderItemResponse {
@@ -123,6 +124,7 @@ export class OrdersService {
     private readonly deliveryService: DeliveryService,
     private readonly notifications: NotificationsOutService,
     private readonly cashRegister: CashRegisterService,
+    private readonly qrPayments: QrPaymentsService,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -263,20 +265,35 @@ export class OrdersService {
       }
 
       // El external_message_id de ESTE envío es lo que PaymentProofsService
-      // usa para "reply_to_qr" (invariante de asociación nivel 1). Todavía no
-      // generamos la imagen del QR real (pago con QR bancario es la próxima
-      // integración) — el texto es un placeholder, pero el mensaje SÍ es real
-      // y quedará como confirmation_external_message_id en notification_jobs.
+      // usa para "reply_to_qr" (invariante de asociación nivel 1) — se sigue
+      // mandando bajo el mismo kind 'qr_confirmation' así ese matching no se
+      // toca, cambia solo el contenido: ahora manda el QR real del banco en
+      // vez de pedir una captura. Si el banco falla, cae al texto de pedir
+      // captura como estaba antes (fallback, no rompe la creación del pedido).
       if (order.paymentMethod === 'qr') {
+        let payload: { customerId: string; text: string; imageUrl?: string };
+        try {
+          const charge = await this.qrPayments.generateForOrder(order.id);
+          payload = {
+            customerId: order.customerId,
+            text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
+            imageUrl: charge.qrImageUrl,
+          };
+        } catch (error) {
+          this.logger.warn(
+            `No se pudo generar el QR real para ${order.id}, cae a texto: ${(error as Error).message}`,
+          );
+          payload = {
+            customerId: order.customerId,
+            text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
+          };
+        }
         try {
           await this.notifications.notifyNow({
             channel: 'whatsapp',
             kind: 'qr_confirmation',
             targetRef: order.id,
-            payload: {
-              customerId: order.customerId,
-              text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
-            },
+            payload,
           });
         } catch (error) {
           this.logger.warn(
@@ -951,6 +968,14 @@ export class OrdersService {
         HttpStatus.CONFLICT,
         'El estado del pedido cambió antes de aplicar esta transición; reintenta.',
       );
+    }
+
+    if (to === 'cancelled' && order.payment_method === 'qr') {
+      this.qrPayments
+        .cancelForOrder(orderId)
+        .catch((error: Error) =>
+          this.logger.warn(`No se pudo cancelar el QR bancario de ${orderId}: ${error.message}`),
+        );
     }
 
     const { items, promotions } = await loadOrderLines(this.db, orderId);

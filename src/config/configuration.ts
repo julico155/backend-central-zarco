@@ -30,6 +30,13 @@ export interface AppConfig {
     /** Solo para proveedores S3-compatibles que no son AWS (Cloudflare R2, MinIO, etc.). Vacío = AWS S3. */
     endpoint: string;
   };
+  baneco: {
+    baseUrl: string;
+    username: string;
+    password: string;
+    aesKey: string;
+    account: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -78,5 +85,12 @@ export default (): AppConfig => ({
     accessKeyId: process.env.PAYMENT_PROOFS_S3_ACCESS_KEY_ID ?? '',
     secretAccessKey: process.env.PAYMENT_PROOFS_S3_SECRET_ACCESS_KEY ?? '',
     endpoint: process.env.PAYMENT_PROOFS_S3_ENDPOINT ?? '',
+  },
+  baneco: {
+    baseUrl: process.env.BANECO_BASE_URL ?? '',
+    username: process.env.BANECO_USERNAME ?? '',
+    password: process.env.BANECO_PASSWORD ?? '',
+    aesKey: process.env.BANECO_AES_KEY ?? '',
+    account: process.env.BANECO_ACCOUNT ?? '',
   },
 });

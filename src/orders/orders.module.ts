@@ -5,6 +5,7 @@ import { NotificationsOutModule } from '../notifications-out/notifications-out.m
 import { OperationalSettingsModule } from '../operational-settings/operational-settings.module';
 import { DeliveryModule } from '../delivery/delivery.module';
 import { CashRegisterModule } from '../cash-register/cash-register.module';
+import { BankQrModule } from '../bank-qr/bank-qr.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 
@@ -16,6 +17,7 @@ import { OrdersService } from './orders.service';
     OperationalSettingsModule,
     DeliveryModule,
     CashRegisterModule,
+    BankQrModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

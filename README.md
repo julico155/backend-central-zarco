@@ -78,7 +78,7 @@ convertirlas en `class` con `@ApiProperty()`.
 - Un módulo por dominio de negocio (`categories`, `products`, `customers`,
   `promotions`, `operational-settings`, `orders`, `delivery`,
   `payment-attempts`, `payment-proofs`, `late-order-requests`, `auth`,
-  `cash-register`).
+  `cash-register`, `baneco`, `bank-qr`).
 
 ## Qué está implementado
 
@@ -154,11 +154,12 @@ simulado:
   `orders.payment_status` (`paid`/`rejected`) y dispara un aviso best-effort
   al cliente — nunca si `won: false`, para no duplicar el efecto.
   `POST /orders/:id/payment-attempts/confirm-presencial` (JWT, rol
-  `cashier`/`admin`) cubre el cobro QR en el mostrador: crea y decide el
-  intento en un solo paso, sin foto ni `payment-proofs` — sigue protegido
-  por el mismo índice único (`uq_payment_attempts_live`), así que no se
-  puede confirmar dos veces ni pisar un intento por foto que haya llegado
-  casi al mismo tiempo. Es provisorio hasta que entre la API de banco.
+  `cashier`/`admin`) es el fallback manual del cobro QR en el mostrador: si
+  ya hay un intento vivo (lo normal, dejado por `QrPaymentsService` al
+  generar el QR real) decide sobre ese; si no, crea y decide en un solo
+  paso. Sigue protegido por el mismo índice único
+  (`uq_payment_attempts_live`), así que no se puede confirmar dos veces ni
+  pisar un intento por foto que haya llegado casi al mismo tiempo.
 - **`cash-register`** — apertura/cierre de caja (turno). Una sola sesión
   `status='open'` a la vez para todo el local (índice único parcial), rol
   `admin`/`cashier` (`POST /cash-register/sessions/open|close`, `GET
@@ -189,6 +190,25 @@ simulado:
   implementado y se activa solo con `PAYMENT_PROOFS_S3_BUCKET` +
   credenciales en `.env`; sin bucket configurado usa disco local
   automáticamente, mismo patrón de auto-selección que `DistanceService`.
+- **`baneco` / `bank-qr`** — QR real de Banco Económico. `BanecoClientService`
+  (`src/baneco/`) es el cliente HTTP crudo (`encrypt`/`authenticate`/
+  `generateQR`/`statusQR`/`cancelQR`, validado en certificación contra el
+  manual del banco; token cacheado en memoria con reautenticación en 401).
+  `QrPaymentsService` (`src/bank-qr/`) es la capa de dominio:
+  `generateForOrder` es idempotente (reusa el intento vivo si ya existe) y
+  crea un `payment_attempts` en `pending_review` igual que hoy con una foto
+  recién asociada — la confirmación real (`resolveCharge`) llama
+  `paymentAttempts.decide(..., 'accepted')`, reusando 100% el CAS, el
+  vínculo a caja y la notificación al cliente que ya existían. Como el banco
+  no validó todavía `notifyPaymentQR` (su propio manual lo marca
+  "pendiente"), el mecanismo principal es un cron (`QrPaymentsPollCron`,
+  cada 30s) que usa `statusQR` — sí validado — sobre cada QR pendiente; el
+  endpoint de webhook (`POST /bank/baneco/webhook/notify-payment`) existe
+  pero solo dispara esa misma re-verificación, nunca confía en el body
+  (todavía no hay forma documentada de autenticar al banco de ese lado).
+  `POST /orders/:id/qr/generate` (JWT, `cashier`/`admin`) es la acción
+  explícita del POS; el canal WhatsApp lo genera solo al crear el pedido
+  (`orders.service.ts`, cae al texto de pedir captura si el banco falla).
 - **`auth`** — login JWT contra `dashboard_users` (bcrypt). Alta de staff
   vía API (`POST /auth/users`, `GET /auth/users`, `PATCH
   /auth/users/:id/active`), protegida con `@Roles('admin')` — el primer
@@ -201,18 +221,12 @@ simulado:
 
 ## Qué falta / deuda conocida
 
-- **Margen horario real todavía no cargado**: `operational_settings` sigue
-  con los valores por defecto (`business_opens_hour: 17`,
-  `business_closes_hour: 23`). El margen ancho real (ej. cerrado 6am-4pm,
-  ver `orders` arriba) hay que cargarlo con `PATCH /operational-settings` —
-  solo dos valores ahora, no hace falta que sean precisos, el gate ya soporta
-  turnos que cruzan medianoche y la caja hace el trabajo fino adentro del
-  margen.
-- **Pago con QR bancario**: pendiente a propósito (dependencia externa aún
-  no definida). El plan menciona una integración próxima con una API de
-  banco. Hoy `payment_method: 'qr'` asume comprobante manual (foto) vía
-  WhatsApp; cuando llegue la integración bancaria, probablemente cree
-  `payment_attempts`/decisiones de forma automática en vez de por
-  `payment-proofs` — diseñar esa entrada sin romper el CAS existente (el
-  efecto downstream en `payment-attempts.decide()` ya está listo para
-  reutilizarse desde ahí).
+- **Pago con QR bancario — pago real sin validar todavía**: Banco Económico
+  solo confirmó `generateQR`/`statusQR`/`cancelQR` en certificación;
+  `statusQrCode = 1` (pago real) y el webhook `notifyPaymentQR` siguen
+  "pendiente" según su propio manual. El código está listo para ambos casos
+  (polling ya funcional contra lo validado, webhook ya recibido pero
+  tratado solo como señal de "revisá ya", nunca como fuente de verdad) —
+  falta que el banco habilite una prueba de pago real en certificación para
+  confirmar de punta a punta, y después pedir credenciales de producción
+  (mismas env vars `BANECO_*`, sin cambios de código esperados).
