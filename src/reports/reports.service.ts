@@ -226,7 +226,7 @@ export class ReportsService {
           'qr_id',
           'transaction_id',
           'amount',
-          'due_date',
+          sql<string>`due_date::text`.as('due_date'),
           'status',
           'created_at',
           'updated_at',

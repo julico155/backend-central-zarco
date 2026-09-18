@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { BankQrChargeStatus, Database } from '../database/types';
 import { DomainException, NotFoundDomainError, ValidationError } from '../common/exceptions/domain-exception';
@@ -67,7 +67,7 @@ export class QrPaymentsService {
     if (existingAttempt) {
       const existingCharge = await this.db
         .selectFrom('bank_qr_charges')
-        .selectAll()
+        .select(['order_id', 'status', sql<string>`due_date::text`.as('due_date')])
         .where('payment_attempt_id', '=', existingAttempt.id)
         .executeTakeFirst();
       if (existingCharge) return toResponse(existingCharge, orderId);
@@ -122,7 +122,7 @@ export class QrPaymentsService {
           qr_image_base64: generated.qrImageBase64,
           raw_generate_response: JSON.stringify(generated.raw),
         })
-        .returningAll()
+        .returning(['order_id', 'status', sql<string>`due_date::text`.as('due_date')])
         .executeTakeFirstOrThrow();
     });
 
@@ -142,13 +142,27 @@ export class QrPaymentsService {
 
   /** Re-verifica un qrId puntual contra el banco y resuelve si corresponde. Usado por el cron y por el webhook. */
   async resolveCharge(qrId: string): Promise<void> {
+    // Nunca selectAll acá: el cron corre cada 5s y la fila trae la imagen del QR + payloads crudos (~70KB).
+    // due_date::text porque el driver pg devuelve `date` como objeto Date, no como 'YYYY-MM-DD'.
     const charge = await this.db
       .selectFrom('bank_qr_charges')
-      .selectAll()
-      .where('qr_id', '=', qrId)
-      .where('status', '=', 'pending')
+      .innerJoin('payment_attempts', 'payment_attempts.id', 'bank_qr_charges.payment_attempt_id')
+      .select([
+        'bank_qr_charges.id as id',
+        'bank_qr_charges.payment_attempt_id as payment_attempt_id',
+        sql<string>`bank_qr_charges.due_date::text`.as('due_date'),
+        'payment_attempts.review_status as review_status',
+      ])
+      .where('bank_qr_charges.qr_id', '=', qrId)
+      .where('bank_qr_charges.status', '=', 'pending')
       .executeTakeFirst();
     if (!charge) return;
+
+    // El intento ya se cerró por otra vía (rechazado, o cobrado a mano): este QR no debe seguir vivo.
+    if (charge.review_status !== 'pending_review') {
+      await this.closeCharge(charge.id, qrId, 'cancelled');
+      return;
+    }
 
     let statusResult;
     try {
@@ -188,19 +202,27 @@ export class QrPaymentsService {
     // statusQrCode === 0 (sigue pendiente): si ya venció, se anula del lado
     // del banco y se marca expired — el payment_attempt sigue pending_review
     // para que el staff pueda regenerar o confirmar a mano.
-    const today = dateInBolivia(new Date());
-    if (charge.due_date < today) {
-      try {
-        await this.baneco.cancelQR(qrId);
-      } catch (error) {
-        this.logger.warn(`cancelQR falló para ${qrId} vencido: ${(error as Error).message}`);
-      }
-      await this.db
-        .updateTable('bank_qr_charges')
-        .set({ status: 'expired', updated_at: new Date() })
-        .where('id', '=', charge.id)
-        .execute();
+    if (charge.due_date < dateInBolivia(new Date())) {
+      await this.closeCharge(charge.id, qrId, 'expired');
     }
+  }
+
+  /** Anula el QR del lado del banco (best-effort) y deja de consultarlo. */
+  private async closeCharge(
+    chargeId: string,
+    qrId: string,
+    status: 'cancelled' | 'expired',
+  ): Promise<void> {
+    try {
+      await this.baneco.cancelQR(qrId);
+    } catch (error) {
+      this.logger.warn(`cancelQR falló para ${qrId} (${status}): ${(error as Error).message}`);
+    }
+    await this.db
+      .updateTable('bank_qr_charges')
+      .set({ status, updated_at: new Date() })
+      .where('id', '=', chargeId)
+      .execute();
   }
 
   async recordNotifyPayload(qrId: string | null, payload: unknown): Promise<void> {
