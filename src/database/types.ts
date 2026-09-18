@@ -60,7 +60,8 @@ export interface IdempotencyKeysTable {
 }
 
 export type OrderChannel = 'whatsapp' | 'web' | 'pos';
-export type OrderDeliveryType = 'delivery' | 'pickup';
+/** delivery = a domicilio, pickup = para llevar (retira en el mostrador), dine_in = para comer en el local (mesa). */
+export type OrderDeliveryType = 'delivery' | 'pickup' | 'dine_in';
 export type OrderPaymentMethod = 'qr' | 'cash' | 'card';
 export type OrderPaymentStatus = 'unpaid' | 'pending_review' | 'paid' | 'rejected';
 export type OrderStatus =

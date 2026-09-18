@@ -4,7 +4,8 @@ Este documento es para quien construya el front del POS. El backend ya
 tiene toda la lógica de negocio (menú, pedidos, delivery, pagos) — el POS
 es un cliente que solo llama a esta API, no reimplementa nada de eso.
 
-**Alcance del POS**: solo `pickup`, sin delivery. Pago en `cash` o `qr`
+**Alcance del POS**: `pickup` (para llevar desde el mostrador) y `dine_in`
+(para comer en el local, mesa), sin delivery. Pago en `cash` o `qr`
 (no habrá `card`). El QR hoy es comprobante manual por foto; pronto se
 integra una API de banco para QR real — cuando eso pase, el flujo de cobro
 por QR va a cambiar y este doc se actualiza.
@@ -115,7 +116,7 @@ Idempotency-Key: <uuid nuevo por cada intento de venta>
   "customerId": "<opcional>",
   "channel": "pos",
   "customerName": "Juan Pérez",           // obligatorio aunque no haya customerId — usá "Cliente mostrador" si no preguntan
-  "deliveryType": "pickup",                // el POS solo vende pickup, no hay delivery desde acá
+  "deliveryType": "pickup",                // "pickup" = para llevar, "dine_in" = mesa; no hay delivery desde el POS
   "paymentMethod": "cash" | "qr",
   "bypassHoursGate": true,                 // el POS SIEMPRE puede vender fuera del horario de delivery de WhatsApp
   "notes": "sin cebolla",                  // opcional

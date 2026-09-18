@@ -35,7 +35,7 @@ const DEFAULT_SPAN_DAYS = 30;
 const MAX_SPAN_DAYS = 366;
 
 const CHANNELS: readonly OrderChannel[] = ['whatsapp', 'web', 'pos'];
-const DELIVERY_TYPES: readonly OrderDeliveryType[] = ['delivery', 'pickup'];
+const DELIVERY_TYPES: readonly OrderDeliveryType[] = ['delivery', 'pickup', 'dine_in'];
 const PAYMENT_METHODS: readonly OrderPaymentMethod[] = ['qr', 'cash', 'card'];
 const PAYMENT_STATUSES: readonly OrderPaymentStatus[] = ['unpaid', 'pending_review', 'paid', 'rejected'];
 const ORDER_STATUSES: readonly OrderStatus[] = [

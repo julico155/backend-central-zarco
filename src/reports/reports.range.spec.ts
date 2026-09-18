@@ -65,6 +65,8 @@ describe('parseSalesFilters', () => {
       deliveryType: 'pickup',
       sold: true,
     });
+    expect(parseSalesFilters({ delivery_type: 'dine_in' }, NOW).deliveryType).toBe('dine_in');
+    expect(() => parseSalesFilters({ delivery_type: 'mesa' }, NOW)).toThrow(ValidationError);
     expect(() => parseSalesFilters({ channel: 'telegram' }, NOW)).toThrow(ValidationError);
     expect(() => parseSalesFilters({ sold: 'si' }, NOW)).toThrow(ValidationError);
     expect(() => parseSalesFilters({ session_id: 'no-es-uuid' }, NOW)).toThrow(ValidationError);

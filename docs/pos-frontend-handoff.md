@@ -71,8 +71,13 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   reintentos por timeout. **No reordenes `items[]`/`promotions[]` entre
   reintentos** — el hash del body es sensible al orden de los arrays.
   201 = venta nueva, 200 = respuesta cacheada (reimpresión, no recobro).
-- **`bypassHoursGate: true` siempre**, junto con `channel: "pos"`,
-  `deliveryType: "pickup"`.
+- **`bypassHoursGate: true` siempre**, junto con `channel: "pos"`.
+- **Tipos de pedido (`deliveryType`)**: `"pickup"` = para llevar desde el
+  mostrador, `"dine_in"` = para comer en el local (mesa), `"delivery"` = a
+  domicilio (el POS no lo usa hoy). `pickup` y `dine_in` nacen `confirmed`,
+  sin ubicación ni costo de envío; el flujo de estados y la regla de pago
+  antes de `preparing` son idénticos. En pantalla mostralos como "Para
+  llevar" / "Mesa" / "Delivery".
 - **Cobro QR real** (Banco Económico): `POST /orders/:id/qr/generate` (rol
   `cashier`/`admin`, exige caja abierta) devuelve
   `{orderId, status, qrImageUrl, dueDate}` — `qrImageUrl` es una ruta
@@ -94,7 +99,7 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
 - **`409 payment_required`** al intentar `confirmed → preparing` si
   `paymentStatus !== 'paid'` — **excepto** `deliveryType: 'delivery'` +
   `paymentMethod: 'cash'` (pago contra entrega real: el repartidor cobra al
-  llegar). El POS solo vende `pickup`, así que esto no te afecta al crear
+  llegar). El POS solo vende `pickup`/`dine_in`, así que esto no te afecta al crear
   pedidos, pero si el tablero de cocina también muestra pedidos de delivery
   de WhatsApp vas a ver `preparing` con `paymentStatus: 'unpaid'`
   legítimamente ahí — no lo marques como error.

@@ -513,11 +513,12 @@ export class OrdersService {
       throw new ValidationError('El total del pedido debe ser positivo.');
     }
 
-    const isPickup = input.deliveryType === 'pickup';
-    const initialStatus: OrderStatus = isPickup ? 'confirmed' : 'awaiting_location';
-    const confirmedAt = isPickup ? now : null;
-    const deliveryPricing = isPickup ? null : ('dynamic' as const);
-    const deliveryQuoteStatus = isPickup ? null : ('pending' as const);
+    // pickup (para llevar) y dine_in (mesa) no necesitan ubicación ni cotización: nacen confirmados.
+    const needsDelivery = input.deliveryType === 'delivery';
+    const initialStatus: OrderStatus = needsDelivery ? 'awaiting_location' : 'confirmed';
+    const confirmedAt = needsDelivery ? null : now;
+    const deliveryPricing = needsDelivery ? ('dynamic' as const) : null;
+    const deliveryQuoteStatus = needsDelivery ? ('pending' as const) : null;
 
     const orderRow = await trx
       .insertInto('orders')
@@ -783,7 +784,7 @@ export class OrdersService {
         .executeTakeFirst();
       if (!order) throw new NotFoundDomainError('order', orderId);
       if (order.delivery_type !== 'delivery') {
-        throw new ValidationError('El pedido ya es pickup.');
+        throw new ValidationError(`El pedido ya es ${order.delivery_type}, no es un delivery.`);
       }
       if (order.delivery_quote_status === 'quoted') {
         throw new DomainException(

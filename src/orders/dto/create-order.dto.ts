@@ -16,7 +16,7 @@ import { OrderItemInputDto } from './order-item-input.dto';
 import { OrderPromotionInputDto } from './order-promotion-input.dto';
 
 const CHANNELS: OrderChannel[] = ['whatsapp', 'web', 'pos'];
-const DELIVERY_TYPES: OrderDeliveryType[] = ['delivery', 'pickup'];
+const DELIVERY_TYPES: OrderDeliveryType[] = ['delivery', 'pickup', 'dine_in'];
 const PAYMENT_METHODS: OrderPaymentMethod[] = ['qr', 'cash', 'card'];
 
 export class CreateOrderDto {

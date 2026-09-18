@@ -24,7 +24,7 @@ en Supabase como las demás.
   `session_id`, `channel` (`whatsapp|web|pos`), `payment_method`
   (`qr|cash|card`), `payment_status`
   (`unpaid|pending_review|paid|rejected`), `status`, `delivery_type`
-  (`delivery|pickup`), `sold` (`true` = solo vendidos).
+  (`delivery|pickup|dine_in` — a domicilio, para llevar, mesa), `sold` (`true` = solo vendidos).
 
 ## Endpoints
 

@@ -58,7 +58,7 @@ Idempotency-Key: <uuid único por intento — SIEMPRE, ver nota abajo>
   "customerId": "<customerId>",
   "channel": "whatsapp",
   "customerName": "Juan Pérez",
-  "deliveryType": "delivery" | "pickup",
+  "deliveryType": "delivery" | "pickup" | "dine_in",   // pickup = para llevar, dine_in = comer en el local
   "paymentMethod": "qr" | "cash" | "card",
   "notes": "sin cebolla" ,           // opcional
   "items": [ { "productId": "<uuid>", "quantity": 2 } ],
