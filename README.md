@@ -203,9 +203,13 @@ simulado:
   no validó todavía `notifyPaymentQR` (su propio manual lo marca
   "pendiente"), el mecanismo principal es un cron (`QrPaymentsPollCron`,
   cada 5s) que usa `statusQR` — sí validado — sobre cada QR pendiente; el
-  endpoint de webhook (`POST /bank/baneco/webhook/notify-payment`) existe
-  pero solo dispara esa misma re-verificación, nunca confía en el body
-  (todavía no hay forma documentada de autenticar al banco de ese lado).
+  webhook `POST /api/qrsimple/notifyPaymentQR` (ruta, formato de request y
+  respuesta `{responseCode, message}` calcados de la sección 6.5 del manual
+  del banco) solo dispara esa misma re-verificación, nunca confía en el body
+  (el manual no define auth para esa dirección — el Bearer es solo para
+  comercio → banco). El `qrId` se acepta envuelto en `Payment`, en `payment`
+  o plano en la raíz, porque el manual declara el objeto pero no da un JSON
+  de ejemplo (ver `notify-payment.ts` y su spec).
   `POST /orders/:id/qr/generate` (JWT, `cashier`/`admin`) es la acción
   explícita del POS; el canal WhatsApp lo genera solo al crear el pedido
   (`orders.service.ts`, cae al texto de pedir captura si el banco falla).
@@ -230,3 +234,11 @@ simulado:
   falta que el banco habilite una prueba de pago real en certificación para
   confirmar de punta a punta, y después pedir credenciales de producción
   (mismas env vars `BANECO_*`, sin cambios de código esperados).
+
+  **URL del webhook para darle al banco**:
+  `https://backend-central-zarco-production.up.railway.app/api/qrsimple/notifyPaymentQR`
+- **`paidQR` sin usar**: la sección 6.6 del manual expone
+  `GET /api/qrsimple/paidQR` con la lista de QR pagados de una fecha, pensada
+  justamente para conciliación. Sería una red de seguridad mejor (y mucho más
+  barata) que el cron de 5s: un barrido por día detecta cualquier pago que el
+  webhook y el polling hayan perdido. Hoy no está implementado.
