@@ -78,7 +78,7 @@ convertirlas en `class` con `@ApiProperty()`.
 - Un módulo por dominio de negocio (`categories`, `products`, `customers`,
   `promotions`, `operational-settings`, `orders`, `delivery`,
   `payment-attempts`, `payment-proofs`, `late-order-requests`, `auth`,
-  `cash-register`, `baneco`, `bank-qr`).
+  `cash-register`, `baneco`, `bank-qr`, `reports`).
 
 ## Qué está implementado
 
@@ -160,6 +160,12 @@ simulado:
   paso. Sigue protegido por el mismo índice único
   (`uq_payment_attempts_live`), así que no se puede confirmar dos veces ni
   pisar un intento por foto que haya llegado casi al mismo tiempo.
+- **`reports`** — reportería y KPIs, solo lectura y solo `admin`
+  (`GET /reports/kpis|sales/timeseries|sales/orders|sales/orders/:id|
+  products/top|cash-sessions`). "Vendido" = pagado y no cancelado, fechas en
+  hora de Bolivia, y `session_id` para cuadrar contra el cierre de caja. Sin
+  tablas nuevas; no hay tiempos de preparación por etapa porque no existe
+  historial de estados. Detalle en `docs/reports-integration.md`.
 - **`cash-register`** — apertura/cierre de caja (turno). Una sola sesión
   `status='open'` a la vez para todo el local (índice único parcial), rol
   `admin`/`cashier` (`POST /cash-register/sessions/open|close`, `GET

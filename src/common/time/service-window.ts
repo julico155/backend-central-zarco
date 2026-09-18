@@ -98,6 +98,11 @@ export function dateInBolivia(instant: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: SERVICE_TIME_ZONE }).format(instant);
 }
 
+/** Instante UTC en que empieza el día calendario `date` (YYYY-MM-DD) en Bolivia — Bolivia es UTC-4 fijo. */
+export function startOfBoliviaDay(date: string): Date {
+  return new Date(`${date}T00:00:00-04:00`);
+}
+
 export const LATE_REQUEST_TTL_MS = 10 * 60 * 1000; // 10 minutos, igual que el proyecto viejo
 
 export function lateRequestExpiryFor(instant: Date): Date {

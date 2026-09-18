@@ -157,6 +157,14 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   máx. 5MB, rol `admin`, reemplaza la foto anterior si había, no hay
   endpoint para borrarla). El backend acepta bodies JSON de hasta 10MB.
 
+- **Reportería / dashboard** (solo `admin`): `GET /reports/kpis`,
+  `sales/timeseries`, `sales/orders`, `sales/orders/:id`, `products/top`,
+  `cash-sessions`. Contrato completo en `docs/reports-integration.md` —
+  "vendido" = pagado y no cancelado, `from`/`to` son fechas de Bolivia
+  (`YYYY-MM-DD`), y para cuadrar con la caja filtrá por `session_id`. Los
+  filtros son query params snake_case; no calcules totales en el cliente, el
+  backend ya los devuelve.
+
 ## Estado del backend (ya hecho y verificado en producción — no lo toques)
 
 CORS configurado (`CORS_ORIGINS` en Railway), guard de auth compuesto, RLS

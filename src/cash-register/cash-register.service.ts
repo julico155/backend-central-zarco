@@ -216,7 +216,7 @@ export class CashRegisterService {
   }
 }
 
-function toResponse(row: {
+export function toResponse(row: {
   id: string;
   status: CashRegisterSessionStatus;
   opened_at: Date | string;

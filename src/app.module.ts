@@ -18,6 +18,7 @@ import { PaymentProofsModule } from './payment-proofs/payment-proofs.module';
 import { LateOrderRequestsModule } from './late-order-requests/late-order-requests.module';
 import { AuthModule } from './auth/auth.module';
 import { CashRegisterModule } from './cash-register/cash-register.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { CashRegisterModule } from './cash-register/cash-register.module';
     LateOrderRequestsModule,
     AuthModule,
     CashRegisterModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}
