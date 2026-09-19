@@ -16,6 +16,11 @@ export class UpdateProductDto {
   name?: string;
 
   @IsOptional()
+  @IsString()
+  @MinLength(1)
+  description?: string;
+
+  @IsOptional()
   @IsUUID()
   categoryId?: string;
 

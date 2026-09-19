@@ -21,6 +21,7 @@ export interface ProductResponse {
   id: string;
   code: string;
   name: string;
+  description: string | null;
   categoryId: string;
   price: number;
   isActive: boolean;
@@ -57,6 +58,7 @@ export class ProductsService {
         .values({
           code: dto.code,
           name: dto.name,
+          description: dto.description ?? null,
           category_id: dto.categoryId,
           price: dto.price.toFixed(2),
           is_active: dto.isActive,
@@ -83,6 +85,7 @@ export class ProductsService {
       .updateTable('products')
       .set({
         ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
         ...(dto.categoryId !== undefined ? { category_id: dto.categoryId } : {}),
         ...(dto.price !== undefined ? { price: dto.price.toFixed(2) } : {}),
         ...(dto.isActive !== undefined ? { is_active: dto.isActive } : {}),
@@ -159,6 +162,7 @@ function toProductResponse(row: {
   id: string;
   code: string;
   name: string;
+  description: string | null;
   category_id: string;
   price: string;
   is_active: boolean;
@@ -170,6 +174,7 @@ function toProductResponse(row: {
     id: row.id,
     code: row.code,
     name: row.name,
+    description: row.description,
     categoryId: row.category_id,
     price: Number(row.price),
     isActive: row.is_active,

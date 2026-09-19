@@ -27,6 +27,7 @@ export interface ProductsTable {
   id: Generated<string>;
   code: string;
   name: string;
+  description: string | null;
   category_id: string;
   price: string; // numeric(10,2) llega como string del driver pg
   is_active: Generated<boolean>;
