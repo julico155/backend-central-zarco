@@ -262,6 +262,15 @@ export class ReportsService {
         deliverySurcharge: Number(order.delivery_surcharge_amount),
         total: Number(order.total_amount),
       },
+      // Solo con paymentMethod='split' — el resto de los pedidos los trae en null.
+      split:
+        order.payment_method === 'split'
+          ? {
+              cashAmount: order.split_cash_amount === null ? null : Number(order.split_cash_amount),
+              qrAmount: order.split_qr_amount === null ? null : Number(order.split_qr_amount),
+              cashConfirmedAt: iso(order.split_cash_confirmed_at),
+            }
+          : null,
       delivery: {
         quoteStatus: order.delivery_quote_status,
         distanceMeters: order.delivery_distance_meters,
