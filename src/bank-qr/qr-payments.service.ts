@@ -59,7 +59,15 @@ export class QrPaymentsService {
   async generateForOrder(orderId: string): Promise<QrChargeResponse> {
     const order = await this.db
       .selectFrom('orders')
-      .select(['id', 'order_number', 'payment_method', 'payment_status', 'total_amount', 'customer_id'])
+      .select([
+        'id',
+        'order_number',
+        'bank_reference',
+        'payment_method',
+        'payment_status',
+        'total_amount',
+        'customer_id',
+      ])
       .where('id', '=', orderId)
       .executeTakeFirst();
     if (!order) throw new NotFoundDomainError('order', orderId);
@@ -93,7 +101,10 @@ export class QrPaymentsService {
     let generated;
     try {
       generated = await this.baneco.generateQR({
-        transactionId: order.order_number,
+        // bank_reference, no order_number: order_number reinicia cada
+        // apertura de caja y puede repetirse entre turnos — el banco nunca
+        // debe ver un transactionId repetido.
+        transactionId: order.bank_reference,
         amount: Number(order.total_amount),
         description: `Pedido ${order.order_number}`,
         dueDate,
@@ -132,7 +143,7 @@ export class QrPaymentsService {
           order_id: orderId,
           payment_attempt_id: attempt.id,
           qr_id: generated.qrId,
-          transaction_id: order.order_number,
+          transaction_id: order.bank_reference,
           amount: order.total_amount,
           due_date: dueDate,
           qr_image_base64: generated.qrImageBase64,

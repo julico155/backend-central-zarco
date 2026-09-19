@@ -298,6 +298,50 @@ export class OrdersService {
     }
   }
 
+  /**
+   * order_number reinicia con cada apertura de caja (no cada día calendario
+   * — el turno cruza medianoche), así que se ancla a la sesión de caja más
+   * reciente por `opened_at`, esté abierta o ya cerrada: los pedidos creados
+   * en el hueco entre un cierre y la siguiente apertura siguen sumando al
+   * contador de la sesión anterior, y recién el próximo "abrir caja" lo
+   * vuelve a poner en 1. El incremento atómico (`UPDATE ... RETURNING`)
+   * dentro de la misma transacción del pedido serializa contra cualquier
+   * otro pedido creándose al mismo tiempo — nunca dos pedidos de la misma
+   * sesión con el mismo número.
+   */
+  private async assignOrderNumber(
+    trx: Transaction<Database>,
+  ): Promise<{ orderNumber: string; numberingSessionId: string | null }> {
+    const latestSession = await trx
+      .selectFrom('cash_register_sessions')
+      .select('id')
+      .orderBy('opened_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+
+    if (!latestSession) {
+      // Caso borde: todavía nunca se abrió una caja (arranque del local).
+      // Cae al viejo contador global, sin sesión que lo ancle.
+      const fallback = await sql<{ nextval: string }>`
+        select nextval('order_number_seq') as nextval
+      `.execute(trx);
+      const n = Number(fallback.rows[0].nextval);
+      return { orderNumber: `ORD-${String(n).padStart(4, '0')}`, numberingSessionId: null };
+    }
+
+    const updated = await trx
+      .updateTable('cash_register_sessions')
+      .set({ next_order_number: sql`next_order_number + 1` })
+      .where('id', '=', latestSession.id)
+      .returning('next_order_number')
+      .executeTakeFirstOrThrow();
+
+    return {
+      orderNumber: `ORD-${String(updated.next_order_number).padStart(4, '0')}`,
+      numberingSessionId: latestSession.id,
+    };
+  }
+
   private async executeCreateOrder(
     trx: Transaction<Database>,
     dto: CreateOrderDto,
@@ -520,9 +564,13 @@ export class OrdersService {
     const deliveryPricing = needsDelivery ? ('dynamic' as const) : null;
     const deliveryQuoteStatus = needsDelivery ? ('pending' as const) : null;
 
+    const { orderNumber, numberingSessionId } = await this.assignOrderNumber(trx);
+
     const orderRow = await trx
       .insertInto('orders')
       .values({
+        order_number: orderNumber,
+        numbering_session_id: numberingSessionId,
         customer_id: input.customerId,
         channel: input.channel,
         customer_name: customerName,

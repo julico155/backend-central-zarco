@@ -78,7 +78,12 @@ export type DeliveryQuoteStatus = 'pending' | 'quoted' | 'pending_manual' | 'fai
 
 export interface OrdersTable {
   id: Generated<string>;
-  order_number: Generated<string>;
+  /** "Pedido #N" para mostrar/imprimir — reinicia cada apertura de caja, ya NO es único a nivel de base. Lo arma la app, no un default de columna. */
+  order_number: string;
+  /** Único para siempre — es lo que se manda al banco como transactionId en cada QR real. */
+  bank_reference: Generated<string>;
+  /** Qué apertura de caja ancla la numeración de order_number de este pedido. */
+  numbering_session_id: string | null;
   customer_id: string | null;
   channel: OrderChannel;
   customer_name: string;
@@ -240,6 +245,8 @@ export interface CashRegisterSessionsTable {
   total_qr_sales_amount: string | null;
   total_sales_amount: string | null;
   notes: string | null;
+  /** Contador de order_number de esta apertura — arranca en 0, cada pedido nuevo lo incrementa atómicamente. */
+  next_order_number: Generated<number>;
 }
 
 export type PaymentProofMatchMethod =

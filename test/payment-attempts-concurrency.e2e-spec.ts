@@ -77,6 +77,7 @@ describeIfDb('PaymentAttemptsService.decide (integración, concurrencia)', () =>
     const order = await db
       .insertInto('orders')
       .values({
+        order_number: `ORD-TEST-${Date.now()}`,
         channel: 'pos',
         customer_name: 'Cliente de test',
         delivery_type: 'pickup',
