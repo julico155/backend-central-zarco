@@ -48,7 +48,12 @@ export class ReportsController {
     return this.reports.getTimeseries(parseSalesFilters(query), parseGroupBy(query.group_by));
   }
 
+  // Estas dos rutas también las usa el cajero desde "Ventas del día" (POS)
+  // para reimprimir un ticket o ver el detalle de una venta de su propio
+  // turno — el resto del módulo (KPIs, gráficos, top productos) sigue solo
+  // para admin.
   @Get('sales/orders')
+  @Roles('admin', 'cashier')
   @FilterQueries()
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
@@ -58,6 +63,7 @@ export class ReportsController {
   }
 
   @Get('sales/orders/:id')
+  @Roles('admin', 'cashier')
   getOrderDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.reports.getOrderDetail(id);
   }
