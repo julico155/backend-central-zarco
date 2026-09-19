@@ -65,13 +65,14 @@ export class QrPaymentsService {
         'bank_reference',
         'payment_method',
         'payment_status',
-        'total_amount',
+        'subtotal_amount',
+        'split_qr_amount',
         'customer_id',
       ])
       .where('id', '=', orderId)
       .executeTakeFirst();
     if (!order) throw new NotFoundDomainError('order', orderId);
-    if (order.payment_method !== 'qr') {
+    if (order.payment_method !== 'qr' && order.payment_method !== 'split') {
       throw new ValidationError('El pedido no es de pago QR.');
     }
     if (order.payment_status === 'paid') {
@@ -80,6 +81,17 @@ export class QrPaymentsService {
         HttpStatus.CONFLICT,
         'El pedido ya está pagado.',
       );
+    }
+
+    // El QR SIEMPRE cobra solo comida (subtotal_amount), nunca el envío —
+    // ya no hay pago contra entrega de la comida en delivery+QR, pero el
+    // envío sigue siendo cobro presencial del repartidor. Con
+    // payment_method='split' (POS presencial) el monto es el que declaró
+    // el cajero en split-payment, no el subtotal.
+    const chargeAmount =
+      order.payment_method === 'split' ? Number(order.split_qr_amount) : Number(order.subtotal_amount);
+    if (order.payment_method === 'split' && order.split_qr_amount === null) {
+      throw new ValidationError('El pedido no tiene un monto de QR definido para el split.');
     }
 
     const existingAttempt = await this.db
@@ -105,7 +117,7 @@ export class QrPaymentsService {
         // apertura de caja y puede repetirse entre turnos — el banco nunca
         // debe ver un transactionId repetido.
         transactionId: order.bank_reference,
-        amount: Number(order.total_amount),
+        amount: chargeAmount,
         description: `Pedido ${order.order_number}`,
         dueDate,
       });
@@ -144,7 +156,7 @@ export class QrPaymentsService {
           payment_attempt_id: attempt.id,
           qr_id: generated.qrId,
           transaction_id: order.bank_reference,
-          amount: order.total_amount,
+          amount: chargeAmount.toFixed(2),
           due_date: dueDate,
           qr_image_base64: generated.qrImageBase64,
           raw_generate_response: JSON.stringify(generated.raw),

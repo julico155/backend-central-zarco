@@ -132,7 +132,7 @@ export class PaymentAttemptsService {
         .where('id', '=', orderId)
         .executeTakeFirst();
       if (!order) throw new NotFoundDomainError('order', orderId);
-      if (order.payment_method !== 'qr') {
+      if (order.payment_method !== 'qr' && order.payment_method !== 'split') {
         throw new ValidationError('El pedido no es de pago QR.');
       }
 
@@ -178,28 +178,53 @@ export class PaymentAttemptsService {
    * pedido a esa sesión, salvo que ya venga vinculado (pedido fuera de
    * horario, se etiquetó al aceptarse). `rejected` no mueve plata, no toca
    * la caja.
+   *
+   * Con `payment_method='split'` esto es solo la pata QR: `accepted` recién
+   * pone `payment_status='paid'` si la pata efectivo YA está confirmada
+   * (`split_cash_confirmed_at`) — si no, el pedido queda `unpaid` hasta que
+   * `OrdersService.confirmCash` complete la otra pata. `rejected` en un
+   * split no toca `payment_status`: rechazar la pata QR no debe deshacer
+   * una pata efectivo que ya entró de verdad — el staff decide a mano qué
+   * hacer con ese pedido (regenerar el QR, o resolverlo por otra vía).
    */
   private async applyPaymentStatusEffect(
     trx: Transaction<Database>,
     orderId: string,
     decision: 'accepted' | 'rejected',
   ): Promise<string | null> {
-    const paymentStatus: OrderPaymentStatus = decision === 'accepted' ? 'paid' : 'rejected';
+    const current = await trx
+      .selectFrom('orders')
+      .select(['register_session_id', 'payment_method', 'split_cash_confirmed_at'])
+      .where('id', '=', orderId)
+      .executeTakeFirstOrThrow();
+
+    const isSplit = current.payment_method === 'split';
+    if (isSplit && decision === 'rejected') {
+      // No tocar payment_status: la pata efectivo, si ya entró, sigue en pie.
+      const order = await trx
+        .selectFrom('orders')
+        .select('customer_id')
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      return order.customer_id;
+    }
+
+    const fullyPaid = decision === 'accepted' && (!isSplit || current.split_cash_confirmed_at !== null);
+    const paymentStatus: OrderPaymentStatus | undefined = decision === 'rejected'
+      ? 'rejected'
+      : fullyPaid
+        ? 'paid'
+        : undefined; // split con la pata efectivo todavía pendiente: no se toca
 
     let registerSessionId: string | undefined;
     if (decision === 'accepted') {
-      const current = await trx
-        .selectFrom('orders')
-        .select('register_session_id')
-        .where('id', '=', orderId)
-        .executeTakeFirstOrThrow();
       registerSessionId = current.register_session_id ?? (await this.cashRegister.assertOpenSessionId(trx));
     }
 
     const order = await trx
       .updateTable('orders')
       .set({
-        payment_status: paymentStatus,
+        ...(paymentStatus !== undefined ? { payment_status: paymentStatus } : {}),
         ...(registerSessionId !== undefined ? { register_session_id: registerSessionId } : {}),
         updated_at: new Date(),
       })

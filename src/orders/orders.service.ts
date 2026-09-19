@@ -64,6 +64,10 @@ export interface OrderResponse {
   deliveryQuoteStatus: string | null;
   deliveryDistanceMeters: number | null;
   cashConfirmedAt: string | null;
+  /** Solo con paymentMethod='split'. */
+  splitCashAmount: number | null;
+  splitQrAmount: number | null;
+  splitCashConfirmedAt: string | null;
   statusUpdatedBy: string | null;
   createdAt: string;
   items: OrderItemResponse[];
@@ -271,7 +275,9 @@ export class OrdersService {
         const charge = await this.qrPayments.generateForOrder(order.id);
         payload = {
           customerId: order.customerId,
-          text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
+          // subtotalAmount, no totalAmount: el QR cobra solo la comida —
+          // el envío (si es delivery) se lo paga al repartidor al entregar.
+          text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
           imageUrl: charge.qrImageUrl,
         };
       } catch (error) {
@@ -280,7 +286,7 @@ export class OrdersService {
         );
         payload = {
           customerId: order.customerId,
-          text: `Tu pedido ${order.orderNumber} es Bs ${order.totalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
+          text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
         };
       }
       try {
@@ -878,8 +884,78 @@ export class OrdersService {
    * Por eso deja de ser un UPDATE suelto y pasa a `SELECT ... FOR UPDATE` +
    * transacción, igual que `switchToPickup`.
    */
+  /**
+   * POST /orders/:id/split-payment — arma un pago dividido (efectivo + QR)
+   * ANTES de confirmar ninguna de las dos patas. Los dos montos los declara
+   * el cajero por separado y tienen que sumar EXACTO el total del pedido —
+   * nunca se calcula un monto a partir del otro, para que un error de
+   * tipeo salte acá y no como una diferencia de caja al cerrar la noche.
+   * Solo mientras el pedido sigue `unpaid`: no se puede convertir a split
+   * un pedido que ya tiene una pata cobrada por otro método.
+   */
+  async setSplitPayment(
+    orderId: string,
+    cashAmount: number,
+    qrAmount: number,
+  ): Promise<OrderResponse> {
+    const order = await this.db
+      .selectFrom('orders')
+      .selectAll()
+      .where('id', '=', orderId)
+      .executeTakeFirst();
+    if (!order) throw new NotFoundDomainError('order', orderId);
+    if (order.payment_status !== 'unpaid') {
+      throw new DomainException(
+        'order_already_paid',
+        HttpStatus.CONFLICT,
+        'El pedido ya tiene un pago en curso o confirmado — no se puede dividir ahora.',
+      );
+    }
+    const total = Number(order.total_amount);
+    const sum = Math.round((cashAmount + qrAmount) * 100) / 100;
+    if (sum !== Math.round(total * 100) / 100) {
+      throw new ValidationError(
+        `Efectivo (${cashAmount.toFixed(2)}) + QR (${qrAmount.toFixed(2)}) debe sumar exactamente el total del pedido (${total.toFixed(2)}).`,
+      );
+    }
+
+    const updated = await this.db
+      .updateTable('orders')
+      .set({
+        payment_method: 'split',
+        split_cash_amount: cashAmount.toFixed(2),
+        split_qr_amount: qrAmount.toFixed(2),
+        split_cash_confirmed_at: null,
+        updated_at: new Date(),
+      })
+      .where('id', '=', orderId)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+
+    const { items, promotions } = await loadOrderLines(this.db, updated.id);
+    return toOrderResponse(updated, items, promotions);
+  }
+
+  /**
+   * CAS sobre cash_confirmed_at (invariante 5): el efecto (avisar grupo de
+   * delivery, luego al cliente) solo se dispara si ESTA llamada ganó el CAS.
+   *
+   * Vincula el pedido a la caja abierta en este momento (invariante de
+   * caja: la plata se atribuye al turno en que entra de verdad) — salvo que
+   * ya venga vinculado (pedido fuera de horario, se etiquetó al aceptarse).
+   * Por eso deja de ser un UPDATE suelto y pasa a `SELECT ... FOR UPDATE` +
+   * transacción, igual que `switchToPickup`.
+   *
+   * Con `payment_method='split'` confirma solo la PATA efectivo
+   * (`split_cash_confirmed_at`, nunca `cash_confirmed_at` — son campos
+   * distintos a propósito, para no confundir "cuánto de esto es 100%
+   * efectivo" con "la pata efectivo de un split"). `payment_status` recién
+   * pasa a `paid` cuando la pata QR también está `accepted` — si ya lo
+   * estaba (llegó primero), acá se completa; si no, el pedido queda
+   * `unpaid` hasta que `PaymentAttemptsService.decide()` la confirme.
+   */
   async confirmCash(orderId: string): Promise<OrderResponse> {
-    const updated = await this.db.transaction().execute(async (trx) => {
+    const result = await this.db.transaction().execute(async (trx) => {
       const order = await trx
         .selectFrom('orders')
         .selectAll()
@@ -887,83 +963,129 @@ export class OrdersService {
         .forUpdate()
         .executeTakeFirst();
       if (!order) throw new NotFoundDomainError('order', orderId);
-      if (order.payment_method !== 'cash') {
+      if (order.payment_method !== 'cash' && order.payment_method !== 'split') {
         throw new ValidationError('El pedido no es de pago en efectivo.');
       }
-      if (order.cash_confirmed_at !== null) return null; // ya confirmado, comportamiento idempotente de abajo
+      const isSplit = order.payment_method === 'split';
+      const alreadyConfirmed = isSplit
+        ? order.split_cash_confirmed_at !== null
+        : order.cash_confirmed_at !== null;
+      if (alreadyConfirmed) return null; // ya confirmado, comportamiento idempotente de abajo
 
-      const registerSessionId = order.register_session_id ?? (await this.cashRegister.assertOpenSessionId(trx));
+      const registerSessionId =
+        order.register_session_id ?? (await this.cashRegister.assertOpenSessionId(trx));
 
-      return trx
+      let qrLegAccepted = false;
+      if (isSplit) {
+        const acceptedQr = await trx
+          .selectFrom('payment_attempts')
+          .select('id')
+          .where('order_id', '=', orderId)
+          .where('review_status', '=', 'accepted')
+          .executeTakeFirst();
+        qrLegAccepted = acceptedQr !== undefined;
+      }
+      const fullyPaid = !isSplit || qrLegAccepted;
+
+      const row = await trx
         .updateTable('orders')
         .set({
-          cash_confirmed_at: new Date(),
-          payment_status: 'paid',
+          ...(isSplit ? { split_cash_confirmed_at: new Date() } : { cash_confirmed_at: new Date() }),
+          ...(fullyPaid ? { payment_status: 'paid' } : {}),
           register_session_id: registerSessionId,
           updated_at: new Date(),
         })
         .where('id', '=', orderId)
         .returningAll()
         .executeTakeFirstOrThrow();
+
+      return { row, fullyPaid };
     });
 
-    if (!updated) {
+    if (!result) {
       const existing = await this.findExistingCashOrder(orderId);
       const { items, promotions } = await loadOrderLines(this.db, existing.id);
       return toOrderResponse(existing, items, promotions);
     }
+    const { row: updated, fullyPaid } = result;
 
-    try {
-      if (updated.delivery_type === 'delivery') {
-        await this.notifications.notifyNow({
-          channel: 'telegram',
-          kind: 'cash_confirmed_delivery_notice',
-          targetRef: updated.id,
-          payload: {
-            chatRef: 'delivery-group',
-            text: `Pedido ${updated.order_number} confirmado en efectivo.`,
-          },
-        });
+    // En un split con la pata QR todavía pendiente, no hay nada "confirmado"
+    // que avisarle a nadie todavía — recién cuando decide() complete la otra
+    // pata se dispara el aviso de pago aceptado (payment-attempts.service.ts).
+    if (fullyPaid) {
+      try {
+        if (updated.delivery_type === 'delivery') {
+          await this.notifications.notifyNow({
+            channel: 'telegram',
+            kind: 'cash_confirmed_delivery_notice',
+            targetRef: updated.id,
+            payload: {
+              chatRef: 'delivery-group',
+              text: `Pedido ${updated.order_number} confirmado en efectivo.`,
+            },
+          });
+        }
+        if (updated.customer_id) {
+          await this.notifications.notifyNow({
+            channel: 'whatsapp',
+            kind: 'cash_confirmed_customer_notice',
+            targetRef: updated.id,
+            payload: {
+              customerId: updated.customer_id,
+              text: `Tu pago en efectivo para el pedido ${updated.order_number} fue confirmado.`,
+            },
+          });
+        }
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo notificar cash confirm para ${updated.id}: ${(error as Error).message}`,
+        );
       }
-      if (updated.customer_id) {
-        await this.notifications.notifyNow({
-          channel: 'whatsapp',
-          kind: 'cash_confirmed_customer_notice',
-          targetRef: updated.id,
-          payload: {
-            customerId: updated.customer_id,
-            text: `Tu pago en efectivo para el pedido ${updated.order_number} fue confirmado.`,
-          },
-        });
-      }
-    } catch (error) {
-      this.logger.warn(
-        `No se pudo notificar cash confirm para ${updated.id}: ${(error as Error).message}`,
-      );
     }
 
     const { items, promotions } = await loadOrderLines(this.db, updated.id);
     return toOrderResponse(updated, items, promotions);
   }
 
+  /**
+   * En un split solo revierte la pata efectivo (`split_cash_confirmed_at`)
+   * — nunca toca `register_session_id`, porque la pata QR puede seguir
+   * atada a esa sesión de verdad. `payment_status` vuelve a `unpaid`
+   * siempre, esté o no la pata QR aceptada: sin las dos patas confirmadas
+   * el pedido no está pagado, punto.
+   */
   async cancelCash(orderId: string): Promise<OrderResponse> {
+    const order = await this.db
+      .selectFrom('orders')
+      .select(['id', 'payment_method'])
+      .where('id', '=', orderId)
+      .executeTakeFirst();
+    if (!order) throw new NotFoundDomainError('order', orderId);
+    const isSplit = order.payment_method === 'split';
+    if (!isSplit && order.payment_method !== 'cash') {
+      throw new ValidationError('El pedido no es de pago en efectivo.');
+    }
+
     const updated = await this.db
       .updateTable('orders')
-      .set({
-        cash_confirmed_at: null,
-        payment_status: 'unpaid',
-        register_session_id: null,
-        updated_at: new Date(),
-      })
+      .set(
+        isSplit
+          ? { split_cash_confirmed_at: null, payment_status: 'unpaid', updated_at: new Date() }
+          : {
+              cash_confirmed_at: null,
+              payment_status: 'unpaid',
+              register_session_id: null,
+              updated_at: new Date(),
+            },
+      )
       .where('id', '=', orderId)
-      .where('payment_method', '=', 'cash')
-      .where('cash_confirmed_at', 'is not', null)
+      .where(isSplit ? 'split_cash_confirmed_at' : 'cash_confirmed_at', 'is not', null)
       .returningAll()
       .executeTakeFirst();
 
-    const order = updated ?? (await this.findExistingCashOrder(orderId));
-    const { items, promotions } = await loadOrderLines(this.db, order.id);
-    return toOrderResponse(order, items, promotions);
+    const result = updated ?? (await this.findExistingCashOrder(orderId));
+    const { items, promotions } = await loadOrderLines(this.db, result.id);
+    return toOrderResponse(result, items, promotions);
   }
 
   private async findExistingCashOrder(orderId: string) {
@@ -973,7 +1095,7 @@ export class OrdersService {
       .where('id', '=', orderId)
       .executeTakeFirst();
     if (!existing) throw new NotFoundDomainError('order', orderId);
-    if (existing.payment_method !== 'cash') {
+    if (existing.payment_method !== 'cash' && existing.payment_method !== 'split') {
       throw new ValidationError('El pedido no es de pago en efectivo.');
     }
     return existing;
@@ -1105,6 +1227,9 @@ function toOrderResponse(
     delivery_quote_status: string | null;
     delivery_distance_meters: number | null;
     cash_confirmed_at: Date | string | null;
+    split_cash_amount: string | null;
+    split_qr_amount: string | null;
+    split_cash_confirmed_at: Date | string | null;
     status_updated_by: string | null;
     created_at: Date | string;
   },
@@ -1144,6 +1269,11 @@ function toOrderResponse(
     deliveryDistanceMeters: order.delivery_distance_meters,
     cashConfirmedAt: order.cash_confirmed_at
       ? new Date(order.cash_confirmed_at).toISOString()
+      : null,
+    splitCashAmount: order.split_cash_amount === null ? null : Number(order.split_cash_amount),
+    splitQrAmount: order.split_qr_amount === null ? null : Number(order.split_qr_amount),
+    splitCashConfirmedAt: order.split_cash_confirmed_at
+      ? new Date(order.split_cash_confirmed_at).toISOString()
       : null,
     statusUpdatedBy: order.status_updated_by,
     createdAt: new Date(order.created_at).toISOString(),

@@ -295,6 +295,42 @@ después si necesitás el pedido actualizado para el ticket.
 
 No hay `card` — no es parte del alcance.
 
+### Pago dividido (parte efectivo, parte QR)
+
+Para cuando el cliente paga una parte en efectivo y el resto por QR. El
+cajero ingresa **los dos montos por separado** — el backend nunca calcula
+uno a partir del otro, así un error de tipeo salta acá y no como una
+diferencia de caja al cerrar la noche:
+
+```
+POST /orders/:id/split-payment
+{ "cashAmount": 20, "qrAmount": 30 }   // tienen que sumar EXACTO totalAmount, o 400
+→ 201 OrderResponse (paymentMethod pasa a "split")
+```
+
+Solo funciona mientras el pedido sigue `unpaid` — no se puede convertir a
+split un pedido que ya tiene un pago en curso o confirmado por otro método
+(`409 order_already_paid`).
+
+Después de armar el split, confirmás cada pata con los endpoints que ya
+conocés — no hay nada nuevo que aprender ahí:
+
+- **Pata efectivo**: `POST /orders/:id/cash/confirm` / `cash/cancel`, igual
+  que un pedido 100% efectivo.
+- **Pata QR**: `POST /orders/:id/qr/generate` (QR real, cobra
+  `qrAmount`, no `totalAmount`) o `POST
+  /orders/:id/payment-attempts/confirm-presencial` (revisión manual) — igual
+  que un pedido 100% QR.
+
+`paymentStatus` recién pasa a `'paid'` cuando **las dos** patas están
+confirmadas — no importa el orden en que las cobrés. Mientras falte una,
+sigue `'unpaid'` (`GET /orders/:id` trae `splitCashAmount`, `splitQrAmount`
+y `splitCashConfirmedAt` para que la pantalla muestre qué falta). Cancelar
+la pata efectivo (`cash/cancel`) vuelve todo a `'unpaid'`, aunque la pata QR
+ya estuviera aceptada — sin las dos, no está pagado. El cuadre de caja del
+cierre (sección 5) ya reparte un split entre el total en efectivo y el
+total en QR correctamente, no lo cuenta entero de un solo lado.
+
 ## 7. Tablero de pedidos (cocina) y cuadre con las motos
 
 **`GET /orders` requiere rol `kitchen`, `cashier` o `admin`.** La idea es

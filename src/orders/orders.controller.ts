@@ -28,6 +28,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { AttachLocationDto } from './dto/attach-location.dto';
 import { KitchenNoteDto } from './dto/kitchen-note.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { SetSplitPaymentDto } from './dto/set-split-payment.dto';
 
 @Controller()
 export class OrdersController {
@@ -107,6 +108,17 @@ export class OrdersController {
   @UseGuards(ServiceAuthGuard)
   switchToPickup(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.switchToPickup(id);
+  }
+
+  // Solo JWT de staff, nunca el token de servicio: es una acción
+  // exclusivamente presencial (el cajero decidiendo con el cliente
+  // adelante), a diferencia de cash/confirm que también usa el agente de
+  // WhatsApp para pago contra entrega.
+  @Post('orders/:id/split-payment')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('cashier', 'admin')
+  setSplitPayment(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetSplitPaymentDto) {
+    return this.orders.setSplitPayment(id, dto.cashAmount, dto.qrAmount);
   }
 
   @Post('orders/:id/cash/confirm')

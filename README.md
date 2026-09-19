@@ -129,6 +129,27 @@ simulado:
   el token de servicio o cualquier JWT. `cash/confirm` y la decisión QR que
   marca `accepted` vinculan el pedido a la caja abierta en ese momento (ver
   `cash-register` abajo) — exigen que haya una.
+
+  **QR nunca cobra el envío**: con `paymentMethod: 'qr'`, el monto cobrado
+  (por `QrPaymentsService` y por el `confirm-presencial` manual) es siempre
+  `subtotal_amount` — nunca `total_amount`. Ya no hay contra entrega de la
+  comida en ningún caso; el envío (si es delivery) sigue siendo cobro
+  presencial del repartidor, fuera del sistema (no hay ninguna columna que
+  lo registre — es operativo, no una transacción).
+
+  **Pago dividido (POS presencial)**: `POST /orders/:id/split-payment`
+  (JWT, `cashier`/`admin`; body `{cashAmount, qrAmount}`, deben sumar
+  exacto `total_amount` o `400`) pasa `payment_method` a `'split'`. Cada
+  pata se confirma con el endpoint que ya existía para ese método
+  (`cash/confirm`/`cash/cancel` para la pata efectivo —
+  `split_cash_confirmed_at`, columna propia, nunca `cash_confirmed_at` —, y
+  `qr/generate`/`confirm-presencial` para la pata QR, cobrando
+  `split_qr_amount` en vez de `subtotal_amount`). `payment_status` pasa a
+  `'paid'` recién cuando **las dos** patas están confirmadas, en cualquier
+  orden; cancelar la pata efectivo vuelve todo a `'unpaid'` aunque la QR ya
+  estuviera aceptada. El cierre de caja (`cash-register`, abajo) reparte
+  el `total_amount` de un split entre efectivo y QR usando
+  `split_cash_amount`/`split_qr_amount`, no lo cuenta entero de un lado.
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
   (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
   congelado en la misma transacción). Distancia vía `DistanceService`

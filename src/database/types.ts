@@ -63,7 +63,8 @@ export interface IdempotencyKeysTable {
 export type OrderChannel = 'whatsapp' | 'web' | 'pos';
 /** delivery = a domicilio, pickup = para llevar (retira en el mostrador), dine_in = para comer en el local (mesa). */
 export type OrderDeliveryType = 'delivery' | 'pickup' | 'dine_in';
-export type OrderPaymentMethod = 'qr' | 'cash' | 'card';
+/** 'split' solo se llega a través de POST /orders/:id/split-payment, nunca al crear el pedido. */
+export type OrderPaymentMethod = 'qr' | 'cash' | 'card' | 'split';
 export type OrderPaymentStatus = 'unpaid' | 'pending_review' | 'paid' | 'rejected';
 export type OrderStatus =
   | 'draft'
@@ -103,6 +104,12 @@ export interface OrdersTable {
   delivery_longitude: number | null;
   delivery_fee_paid: Generated<boolean>;
   cash_confirmed_at: Timestamp | null;
+  /** Solo con payment_method='split': cuánto de la cuenta va en efectivo. */
+  split_cash_amount: string | null;
+  /** Solo con payment_method='split': cuánto va por QR — split_cash_amount + split_qr_amount = total_amount, siempre. */
+  split_qr_amount: string | null;
+  /** Confirmación de la pata efectivo de un split — separado de cash_confirmed_at, que es solo para payment_method='cash' puro. */
+  split_cash_confirmed_at: Timestamp | null;
   confirmed_at: Timestamp | null;
   status_updated_by: string | null;
   /** Caja (turno) donde se confirmó el pago — null hasta que se cobra (o al aceptarse, si fue fuera de horario). */

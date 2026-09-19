@@ -84,22 +84,34 @@ POST /orders/:id/location
 
 Adjuntar la ubicación dispara la cotización automáticamente (distancia real
 por calle, tarifa, recargo por lluvia si aplica). La respuesta trae el
-pedido actualizado con `totalAmount` ya con el delivery incluido — ahí es
-cuando le confirmás el total final al cliente.
+pedido actualizado con `totalAmount` ya con el delivery incluido.
+
+⚠️ **`totalAmount` NO es lo que se cobra por QR.** Con `paymentMethod: "qr"`
+el QR **siempre cobra solo la comida** (`subtotalAmount`) — nunca hay pago
+contra entrega de la comida, pero el envío sí sigue siendo cobro contra
+entrega: el repartidor lo cobra en efectivo al llegar. Cuando le confirmés
+el total al cliente, decile los dos montos por separado y aclarale ese
+punto — por ejemplo: *"Tu pedido de comida es Bs {subtotalAmount} (ya
+pagado por QR) + Bs {deliveryBaseAmount + deliverySurchargeAmount} de envío,
+que le pagás al repartidor al recibir."* Si le decís un solo número
+(`totalAmount`) sin aclarar, va a esperar que el QR cubra todo y se va a
+confundir cuando el repartidor le pida el envío en efectivo.
 
 ### 2.5 Pago QR
 
 Para pedidos con `paymentMethod: "qr"`, el backend genera un QR real del
-banco apenas se crea el pedido y te lo manda solo, como un mensaje normal
-(`POST /gateway/whatsapp/messages` con `imageUrl`) — no hace falta que el
-agente pida nada. La confirmación del pago también es automática (el
-backend consulta al banco solo); cuando se confirma, el agente recibe otro
-mensaje saliente normal avisándole al cliente.
+banco apenas se crea el pedido (por `subtotalAmount`, ver arriba) y te lo
+manda solo, como un mensaje normal (`POST /gateway/whatsapp/messages` con
+`imageUrl`) — no hace falta que el agente pida nada. La confirmación del
+pago también es automática (el backend consulta al banco solo); cuando se
+confirma, el agente recibe otro mensaje saliente normal avisándole al
+cliente.
 
 Si por algún motivo el banco falla al generar el QR, el backend cae a pedir
 la captura como antes (mismo mecanismo de `payment-proofs` de abajo) — el
 agente no necesita distinguir un caso del otro, ambos llegan como mensajes
-salientes normales.
+salientes normales. El monto a comprobar en la foto también es solo la
+comida, nunca el envío.
 
 #### Comprobante de pago (fallback si el cliente paga por fuera y manda foto igual)
 

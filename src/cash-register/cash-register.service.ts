@@ -152,22 +152,36 @@ export class CashRegisterService {
   /**
    * Solo lo YA pagado: un pedido tardío se vincula a la caja al aceptarse
    * (antes de cobrarse), así que sin este filtro un cash todavía impago
-   * contaría como plata ya en el cajón.
+   * contaría como plata ya en el cajón. Un pedido `split` reparte su
+   * `total_amount` entre las dos patas (`split_cash_amount`/
+   * `split_qr_amount`) en vez de contarlo entero en un solo bucket — si no,
+   * el efectivo real en el cajón quedaría mal calculado cada vez que
+   * alguien paga mitad y mitad.
    */
   private async sumPaidSales(
     db: Kysely<Database> | Transaction<Database>,
     sessionId: string,
   ): Promise<{ cash: number; qr: number }> {
-    const sums = await db
+    const result = await db
       .selectFrom('orders')
-      .select(['payment_method', sql<string>`coalesce(sum(total_amount), 0)`.as('total')])
+      .select([
+        sql<string>`coalesce(sum(case
+          when payment_method = 'cash' then total_amount
+          when payment_method = 'split' then split_cash_amount
+          else 0
+        end), 0)`.as('cash_total'),
+        sql<string>`coalesce(sum(case
+          when payment_method = 'qr' then total_amount
+          when payment_method = 'split' then split_qr_amount
+          else 0
+        end), 0)`.as('qr_total'),
+      ])
       .where('register_session_id', '=', sessionId)
       .where('payment_status', '=', 'paid')
-      .groupBy('payment_method')
-      .execute();
+      .executeTakeFirst();
     return {
-      cash: Number(sums.find((s) => s.payment_method === 'cash')?.total ?? 0),
-      qr: Number(sums.find((s) => s.payment_method === 'qr')?.total ?? 0),
+      cash: Number(result?.cash_total ?? 0),
+      qr: Number(result?.qr_total ?? 0),
     };
   }
 
