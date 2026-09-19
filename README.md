@@ -219,6 +219,27 @@ simulado:
   `POST /orders/:id/qr/generate` (JWT, `cashier`/`admin`) es la acción
   explícita del POS; el canal WhatsApp lo genera solo al crear el pedido
   (`orders.service.ts`, cae al texto de pedir captura si el banco falla).
+
+  **Pago cobrado que no se puede aplicar**: `decide()` exige caja abierta,
+  así que un pago que entra después del cierre no se puede aplicar. El orden
+  importa y es deliberado: primero `decide()`, y recién si sale bien se marca
+  el cobro `confirmed` — al revés, marcar `confirmed` primero haría que el
+  cron dejara de mirar ese qrId (solo barre `pending`) y la plata quedaría
+  cobrada en el banco con el pedido impago, sin reintento. Si falla por caja
+  cerrada se anota `paid_detected_at` y se reintenta durante un margen de
+  gracia de 10 min (cubre el cierre corto por cambio de turno, ver
+  `unapplied-payment.ts`); pasado el margen el cobro queda `paid_unapplied`
+  y se dispara una alerta a Telegram al staff. Aplicar ese pago a la caja del
+  día siguiente sería peor que no aplicarlo: entraría en el cuadre de otra
+  jornada y el pedido de anoche ya no se va a cocinar. La resolución es
+  humana: `GET /bank-qr/unapplied-payments` (JWT, `cashier`/`admin`) lista la
+  cola con teléfono del cliente para poder contactarlo, `POST
+  /bank-qr/unapplied-payments/:id/apply` lo aplica si el local sigue abierto,
+  y `POST /bank-qr/unapplied-payments/:id/refunded` (rol `admin`) deja
+  registro de que ya se le devolvió la plata — el banco **no expone ninguna
+  API de devolución** (manual v1.0.0: solo generar, anular, consultar y
+  listar pagados), así que devolver es siempre manual y esto es solo la
+  traza.
 - **`auth`** — login JWT contra `dashboard_users` (bcrypt). Alta de staff
   vía API (`POST /auth/users`, `GET /auth/users`, `PATCH
   /auth/users/:id/active`), protegida con `@Roles('admin')` — el primer

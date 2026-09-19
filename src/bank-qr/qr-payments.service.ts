@@ -6,12 +6,27 @@ import { DomainException, NotFoundDomainError, ValidationError } from '../common
 import { dateInBolivia } from '../common/time/service-window';
 import { BanecoClientService } from '../baneco/baneco-client.service';
 import { PaymentAttemptsService } from '../payment-attempts/payment-attempts.service';
+import { NotificationsOutService } from '../notifications-out/notifications-out.service';
+import { decideUnappliedPayment } from './unapplied-payment';
 
 export interface QrChargeResponse {
   orderId: string;
   status: BankQrChargeStatus;
   qrImageUrl: string;
   dueDate: string;
+}
+
+/** Un pago que el banco cobró y que ninguna caja recibió — espera decisión humana. */
+export interface UnappliedPaymentResponse {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string | null;
+  qrId: string;
+  amount: number;
+  paidDetectedAt: string | null;
+  orderPaymentStatus: string;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -33,6 +48,7 @@ export class QrPaymentsService {
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly baneco: BanecoClientService,
     private readonly paymentAttempts: PaymentAttemptsService,
+    private readonly notifications: NotificationsOutService,
   ) {}
 
   /**
@@ -149,7 +165,10 @@ export class QrPaymentsService {
       .innerJoin('payment_attempts', 'payment_attempts.id', 'bank_qr_charges.payment_attempt_id')
       .select([
         'bank_qr_charges.id as id',
+        'bank_qr_charges.order_id as order_id',
         'bank_qr_charges.payment_attempt_id as payment_attempt_id',
+        'bank_qr_charges.amount as amount',
+        'bank_qr_charges.paid_detected_at as paid_detected_at',
         sql<string>`bank_qr_charges.due_date::text`.as('due_date'),
         'payment_attempts.review_status as review_status',
       ])
@@ -173,6 +192,18 @@ export class QrPaymentsService {
     }
 
     if (statusResult.statusQrCode === 1) {
+      // El pago SIEMPRE se aplica antes de marcar el cobro como confirmado:
+      // 'confirmed' es lo que hace que el cron deje de mirar este qrId, así
+      // que marcarlo primero y fallar después dejaría la plata cobrada en el
+      // banco y el pedido impago, sin reintento. decide() es idempotente
+      // (CAS), así que si el proceso muere entre ambos pasos el cron
+      // reintenta sin aplicar el pago dos veces.
+      try {
+        await this.paymentAttempts.decide(charge.payment_attempt_id, 'accepted');
+      } catch (error) {
+        await this.handleUnappliedPayment(charge, qrId, statusResult.raw, error);
+        return;
+      }
       await this.db
         .updateTable('bank_qr_charges')
         .set({
@@ -182,7 +213,6 @@ export class QrPaymentsService {
         })
         .where('id', '=', charge.id)
         .execute();
-      await this.paymentAttempts.decide(charge.payment_attempt_id, 'accepted');
       return;
     }
 
@@ -207,6 +237,98 @@ export class QrPaymentsService {
     }
   }
 
+  /**
+   * El banco cobró pero el pago no se pudo aplicar al pedido — en la
+   * práctica, siempre `cash_register_closed`: entró con la caja cerrada.
+   * La plata ya está en la cuenta, así que no se descarta ni se aplica a
+   * destiempo (aplicarla al abrir la caja de mañana la metería en el cuadre
+   * de otra jornada, y el pedido de anoche ya no se cocina).
+   *
+   * Dentro del margen de gracia se deja `pending` y el cron reintenta, que
+   * cubre el cierre corto por cambio de turno. Pasado el margen se asume
+   * jornada terminada: queda `paid_unapplied` y se avisa al staff para que
+   * alguien decida (aplicarlo, o devolverle la plata al cliente a mano — el
+   * banco no expone API de devolución).
+   */
+  private async handleUnappliedPayment(
+    charge: { id: string; order_id: string; amount: string; paid_detected_at: Date | null },
+    qrId: string,
+    rawStatus: unknown,
+    error: unknown,
+  ): Promise<void> {
+    const isCashRegisterClosed =
+      error instanceof DomainException && error.code === 'cash_register_closed';
+    if (!isCashRegisterClosed) {
+      // Fallo inesperado (red, base): se deja 'pending' a propósito para que
+      // el cron lo reintente en el próximo tick.
+      this.logger.error(
+        `No se pudo aplicar el pago de ${qrId}: ${(error as Error).message}`,
+      );
+      return;
+    }
+
+    const now = new Date();
+    const firstDetectedAt = charge.paid_detected_at ? new Date(charge.paid_detected_at) : null;
+
+    if (decideUnappliedPayment(firstDetectedAt, now) === 'retry_later') {
+      await this.db
+        .updateTable('bank_qr_charges')
+        .set({
+          paid_detected_at: firstDetectedAt ?? now,
+          raw_status_response: JSON.stringify(rawStatus),
+          updated_at: now,
+        })
+        .where('id', '=', charge.id)
+        .execute();
+      this.logger.warn(`Pago de ${qrId} sin caja abierta; se reintenta dentro del margen.`);
+      return;
+    }
+
+    const escalated = await this.db
+      .updateTable('bank_qr_charges')
+      .set({
+        status: 'paid_unapplied',
+        raw_status_response: JSON.stringify(rawStatus),
+        updated_at: now,
+      })
+      .where('id', '=', charge.id)
+      .where('status', '=', 'pending')
+      .returning('id')
+      .executeTakeFirst();
+    // CAS: si otro tick ya escaló este cobro, no se duplica la alerta.
+    if (!escalated) return;
+
+    this.logger.error(
+      `Pago cobrado sin aplicar (${qrId}, pedido ${charge.order_id}, Bs ${charge.amount}): requiere decisión manual.`,
+    );
+
+    const order = await this.db
+      .selectFrom('orders')
+      .select(['order_number', 'customer_name'])
+      .where('id', '=', charge.order_id)
+      .executeTakeFirst();
+
+    try {
+      await this.notifications.notifyNow({
+        channel: 'telegram',
+        kind: 'qr_paid_unapplied_alert',
+        targetRef: charge.id,
+        payload: {
+          chatRef: 'staff-group',
+          text:
+            `Pago QR cobrado SIN aplicar — pedido ${order?.order_number ?? charge.order_id}` +
+            ` (${order?.customer_name ?? 'sin nombre'}), Bs ${charge.amount}.` +
+            ' Entró con la caja cerrada: hay que aplicarlo si el local sigue abierto,' +
+            ' o devolverle la plata al cliente.',
+        },
+      });
+    } catch (notifyError) {
+      this.logger.warn(
+        `No se pudo avisar del pago sin aplicar ${charge.id}: ${(notifyError as Error).message}`,
+      );
+    }
+  }
+
   /** Anula el QR del lado del banco (best-effort) y deja de consultarlo. */
   private async closeCharge(
     chargeId: string,
@@ -223,6 +345,89 @@ export class QrPaymentsService {
       .set({ status, updated_at: new Date() })
       .where('id', '=', chargeId)
       .execute();
+  }
+
+  /** Cola de pagos cobrados que ninguna caja recibió — la pantalla donde se decide qué hacer con cada uno. */
+  async findUnappliedPayments(): Promise<UnappliedPaymentResponse[]> {
+    const rows = await this.db
+      .selectFrom('bank_qr_charges')
+      .innerJoin('orders', 'orders.id', 'bank_qr_charges.order_id')
+      .leftJoin('customers', 'customers.id', 'orders.customer_id')
+      .select([
+        'bank_qr_charges.id as id',
+        'bank_qr_charges.order_id as order_id',
+        'bank_qr_charges.qr_id as qr_id',
+        'bank_qr_charges.amount as amount',
+        'bank_qr_charges.paid_detected_at as paid_detected_at',
+        'orders.order_number as order_number',
+        'orders.customer_name as customer_name',
+        'orders.payment_status as payment_status',
+        'customers.phone as customer_phone',
+      ])
+      .where('bank_qr_charges.status', '=', 'paid_unapplied')
+      .orderBy('bank_qr_charges.paid_detected_at', 'asc')
+      .execute();
+
+    return rows.map((r) => ({
+      id: r.id,
+      orderId: r.order_id,
+      orderNumber: r.order_number,
+      customerName: r.customer_name,
+      // Para poder escribirle al cliente y devolverle la plata.
+      customerPhone: r.customer_phone,
+      qrId: r.qr_id,
+      amount: Number(r.amount),
+      paidDetectedAt: r.paid_detected_at ? new Date(r.paid_detected_at).toISOString() : null,
+      orderPaymentStatus: r.payment_status,
+    }));
+  }
+
+  /**
+   * Aplica a mano un pago que había quedado sin aplicar (el local sigue
+   * abierto, o se reabrió la caja). Exige caja abierta como cualquier otro
+   * cobro: es `decide()` el que la valida, igual que en el camino normal.
+   */
+  async applyUnappliedPayment(chargeId: string): Promise<void> {
+    const charge = await this.loadUnapplied(chargeId);
+    await this.paymentAttempts.decide(charge.payment_attempt_id, 'accepted');
+    await this.db
+      .updateTable('bank_qr_charges')
+      .set({ status: 'confirmed', updated_at: new Date() })
+      .where('id', '=', chargeId)
+      .where('status', '=', 'paid_unapplied')
+      .execute();
+  }
+
+  /**
+   * La plata se le devolvió al cliente por fuera (el banco no expone API de
+   * devolución). Esto solo deja registro de que ya se resolvió, para sacarlo
+   * de la cola; el pedido no se toca — cancelarlo o no es decisión aparte.
+   */
+  async markRefunded(chargeId: string, notes: string | undefined): Promise<void> {
+    await this.loadUnapplied(chargeId);
+    await this.db
+      .updateTable('bank_qr_charges')
+      .set({ status: 'refunded', resolution_notes: notes ?? null, updated_at: new Date() })
+      .where('id', '=', chargeId)
+      .where('status', '=', 'paid_unapplied')
+      .execute();
+  }
+
+  private async loadUnapplied(chargeId: string) {
+    const charge = await this.db
+      .selectFrom('bank_qr_charges')
+      .select(['id', 'payment_attempt_id', 'status'])
+      .where('id', '=', chargeId)
+      .executeTakeFirst();
+    if (!charge) throw new NotFoundDomainError('bank_qr_charge', chargeId);
+    if (charge.status !== 'paid_unapplied') {
+      throw new DomainException(
+        'charge_not_unapplied',
+        HttpStatus.CONFLICT,
+        `El cobro no está pendiente de decisión (estado actual: ${charge.status}).`,
+      );
+    }
+    return charge;
   }
 
   async recordNotifyPayload(qrId: string | null, payload: unknown): Promise<void> {

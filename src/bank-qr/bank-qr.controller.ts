@@ -17,6 +17,7 @@ import { Roles } from '../auth/roles.decorator';
 import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { QrPaymentsService } from './qr-payments.service';
 import { extractQrId } from './notify-payment';
+import { MarkRefundedDto } from './dto/mark-refunded.dto';
 
 @Controller()
 export class BankQrController {
@@ -32,6 +33,36 @@ export class BankQrController {
   @Roles('admin', 'cashier')
   generate(@Param('id', ParseUUIDPipe) id: string) {
     return this.qrPayments.generateForOrder(id);
+  }
+
+  /**
+   * Pagos que el banco cobró pero que ninguna caja recibió (entraron con la
+   * caja cerrada). La plata está en la cuenta y el pedido sigue impago:
+   * alguien tiene que decidir si se aplica o se le devuelve al cliente.
+   */
+  @Get('bank-qr/unapplied-payments')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'cashier')
+  findUnapplied() {
+    return this.qrPayments.findUnappliedPayments();
+  }
+
+  /** El local sigue abierto: se aplica el pago al pedido (exige caja abierta, como cualquier cobro). */
+  @Post('bank-qr/unapplied-payments/:id/apply')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'cashier')
+  @HttpCode(204)
+  applyUnapplied(@Param('id', ParseUUIDPipe) id: string) {
+    return this.qrPayments.applyUnappliedPayment(id);
+  }
+
+  /** Ya se le devolvió la plata al cliente por fuera — el banco no tiene API de devolución. */
+  @Post('bank-qr/unapplied-payments/:id/refunded')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @HttpCode(204)
+  markRefunded(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MarkRefundedDto) {
+    return this.qrPayments.markRefunded(id, dto.notes);
   }
 
   /** Streaming autenticado — mismo criterio que fotos de producto, nunca Base64 crudo en un JSON. */

@@ -178,7 +178,19 @@ export interface PaymentAttemptsTable {
   updated_at: Timestamp;
 }
 
-export type BankQrChargeStatus = 'pending' | 'confirmed' | 'cancelled' | 'expired';
+/**
+ * `paid_unapplied`: el banco confirmó el pago pero no se pudo aplicar al
+ * pedido (caja cerrada). La plata está cobrada y espera decisión humana —
+ * aplicarla o devolverla (`refunded`, siempre manual: el banco no expone
+ * API de devolución).
+ */
+export type BankQrChargeStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'cancelled'
+  | 'expired'
+  | 'paid_unapplied'
+  | 'refunded';
 
 /**
  * QR real de Banco Económico, 1 a 1 con un payment_attempt (el que ya trae
@@ -198,6 +210,9 @@ export interface BankQrChargesTable {
   raw_generate_response: JSONColumnType<Record<string, unknown>> | null;
   raw_status_response: JSONColumnType<Record<string, unknown>> | null;
   raw_notify_payload: JSONColumnType<Record<string, unknown>> | null;
+  /** Primera vez que el banco lo reportó pagado sin poder aplicarlo — ancla del margen de gracia. */
+  paid_detected_at: Timestamp | null;
+  resolution_notes: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

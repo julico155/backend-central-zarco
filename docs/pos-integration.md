@@ -406,6 +406,33 @@ Todas necesitan el rol correcto:
 | Alta de staff | `POST/GET /auth/users`, `PATCH /auth/users/:id/active` | `admin` |
 | Pedidos fuera de horario (cola) | `GET /late-order-requests`, `POST /:id/accept`, `POST /:id/reject` | `admin` o `cashier` |
 | Apertura/cierre de caja | `POST /cash-register/sessions/open`, `/close` | `admin` o `cashier` |
+| Pagos QR cobrados sin aplicar (ver abajo) | `GET /bank-qr/unapplied-payments`, `POST /:id/apply`, `POST /:id/refunded` | `admin` o `cashier` (`refunded`: solo `admin`) |
+
+**Pagos QR cobrados sin aplicar.** Un cliente puede pagar el QR justo
+después de que cerraron la caja. La plata entra al banco igual, pero el
+backend no puede aplicarla a ningún turno, así que el cobro queda apartado y
+llega una alerta a Telegram. Esta pantalla es la que resuelve esos casos:
+
+```
+GET /bank-qr/unapplied-payments
+→ 200 [ { id, orderId, orderNumber, customerName, customerPhone, amount, paidDetectedAt, orderPaymentStatus } ]
+```
+
+Viene el teléfono del cliente justamente para poder escribirle. Dos salidas,
+y las dos las decide una persona:
+
+- `POST /bank-qr/unapplied-payments/:id/apply` → 204. El local sigue abierto:
+  se aplica el pago al pedido y el pedido pasa a pagado. **Exige caja
+  abierta** como cualquier cobro (si no hay, `409 cash_register_closed`).
+- `POST /bank-qr/unapplied-payments/:id/refunded` → 204, body
+  `{ "notes": "devuelto por transferencia" }` (opcional). Solo deja registro
+  de que ya se le devolvió la plata al cliente: **el banco no tiene API de
+  devolución**, así que devolver es siempre a mano y esto solo lo saca de la
+  cola. El pedido no se toca — si hay que cancelarlo, va por
+  `PATCH /orders/:id/status`.
+
+Si el cobro ya no está pendiente de decisión (otro lo resolvió antes), las
+dos devuelven `409 charge_not_unapplied`.
 
 `POST /late-order-requests/:id/accept` exige caja abierta (sección 5) — es
 el momento en que un pedido fuera de horario entra oficialmente al turno,
