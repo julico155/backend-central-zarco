@@ -1,10 +1,14 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { NotFoundDomainError } from '../common/exceptions/domain-exception';
+import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
+}
 
 export type PromotionStatus =
   'activa' | 'agotada' | 'sin_ahorro' | 'inactiva' | 'archivada' | 'programada' | 'expirada';
@@ -230,22 +234,56 @@ export class PromotionsService {
     return toPromotionResponse(promotion, itemsByPromotion.get(id) ?? []);
   }
 
+  /**
+   * Un mismo producto no puede aparecer dos veces en la misma promoción
+   * (`unique (promotion_id, product_id)`) — "2 unidades de un producto" se
+   * expresa con `quantity`, no repitiendo la línea. Se valida acá antes de
+   * tocar la base (mensaje preciso, con el producto exacto) y además se
+   * atrapa el unique violation como red de seguridad, para no dejar
+   * escapar nunca un 500 crudo de Postgres.
+   */
   private async replaceItems(
     trx: Transaction<Database>,
     promotionId: string,
     items: { productId: string; quantity: number }[],
   ): Promise<void> {
+    const seen = new Set<string>();
+    const duplicated = new Set<string>();
+    for (const item of items) {
+      if (seen.has(item.productId)) duplicated.add(item.productId);
+      seen.add(item.productId);
+    }
+    if (duplicated.size > 0) {
+      throw new DomainException(
+        'promotion_duplicate_product',
+        HttpStatus.BAD_REQUEST,
+        'Un producto no puede repetirse en la misma promoción — usá quantity para varias unidades.',
+        { productIds: [...duplicated] },
+      );
+    }
+
     await trx.deleteFrom('promotion_items').where('promotion_id', '=', promotionId).execute();
-    await trx
-      .insertInto('promotion_items')
-      .values(
-        items.map((item) => ({
-          promotion_id: promotionId,
-          product_id: item.productId,
-          quantity: item.quantity,
-        })),
-      )
-      .execute();
+    try {
+      await trx
+        .insertInto('promotion_items')
+        .values(
+          items.map((item) => ({
+            promotion_id: promotionId,
+            product_id: item.productId,
+            quantity: item.quantity,
+          })),
+        )
+        .execute();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new DomainException(
+          'promotion_duplicate_product',
+          HttpStatus.BAD_REQUEST,
+          'Un producto no puede repetirse en la misma promoción — usá quantity para varias unidades.',
+        );
+      }
+      throw error;
+    }
   }
 
   private async loadItems(

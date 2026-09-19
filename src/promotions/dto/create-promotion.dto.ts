@@ -28,8 +28,11 @@ export class CreatePromotionDto {
   @Max(5000)
   promoPrice!: number;
 
+  // Al menos 1: una promoción puede ser un solo producto (varias unidades,
+  // o incluso una sola) con un precio especial — no hace falta que sea un
+  // combo de productos distintos.
   @IsArray()
-  @ArrayMinSize(2)
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PromotionItemInputDto)
   items!: PromotionItemInputDto[];

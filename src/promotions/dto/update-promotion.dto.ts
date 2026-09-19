@@ -32,7 +32,7 @@ export class UpdatePromotionDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(2)
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PromotionItemInputDto)
   items?: PromotionItemInputDto[];

@@ -449,9 +449,11 @@ Trampas del mantenimiento de menú, todas por `forbidNonWhitelisted`:
 - **Una promoción nace inactiva**: `POST /promotions` no acepta `isActive`, así
   que hace falta un segundo llamado a `PATCH /promotions/:id/active`. El orden
   se ajusta aparte con `POST /promotions/:id/move`.
-- **`items` de una promoción exige 2 elementos distintos**: un combo de "2× el
-  mismo producto" es rechazado (la validación cuenta elementos del array, no
-  unidades).
+- **`items` acepta desde 1 elemento**: una promoción puede ser un solo
+  producto con precio especial (una unidad, o varias vía `quantity`). Lo que
+  **sí** se rechaza es repetir el mismo `productId` en dos elementos del
+  array — para "2 unidades" se usa `quantity: 2` en una sola línea, no dos
+  líneas de `quantity: 1` (`400 promotion_duplicate_product`).
 
 **Subir foto de producto**:
 
@@ -505,6 +507,7 @@ Códigos que el POS puede encontrarse:
 | `invalid_credentials` | 401 | Login fallido |
 | `not_found` | 404 | `details.resource` dice qué no se encontró |
 | `product_code_taken` / `username_taken` | 409 | Duplicado en alta de producto/staff |
+| `promotion_duplicate_product` | 400 | El mismo `productId` aparece dos veces en `items` de una promoción — usá `quantity` |
 | `validation_error` / `http_error` | 400 | Error de formulario |
 
 ## 10. Para probar mientras desarrollan
