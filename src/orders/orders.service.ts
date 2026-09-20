@@ -35,6 +35,7 @@ export interface OrderItemResponse {
   unitPriceSnapshot: number;
   quantity: number;
   subtotal: number;
+  excludedComplements: string[];
 }
 
 export interface OrderPromotionResponse {
@@ -94,7 +95,7 @@ export interface CheckoutCartInput {
   deliveryType: OrderDeliveryType;
   paymentMethod: OrderPaymentMethod;
   notes: string | null;
-  items: { productId: string; quantity: number }[];
+  items: { productId: string; quantity: number; excludedComplements?: string[] }[];
   promotions: { promotionId: string; quantity: number; revision: number }[];
   /** Solo lo pasa LateOrderRequestsService.accept() — un pedido normal nace sin caja, se vincula recién al cobrarse. */
   registerSessionId?: string | null;
@@ -405,8 +406,15 @@ export class OrdersService {
     }
 
     const productIds = items.map((i) => i.productId);
-    if (new Set(productIds).size !== productIds.length) {
-      throw new ValidationError('El carrito tiene productos duplicados.');
+    // Dos líneas del mismo producto son válidas si tienen distinta selección
+    // de complementos (ej. "sin quirquiña" en una sola unidad) — lo que no
+    // vale es repetir exactamente la misma combinación en dos líneas, eso
+    // debería ser una sola línea con más quantity.
+    const itemLineKeys = items.map((i) => `${i.productId}::${complementsKey(i.excludedComplements)}`);
+    if (new Set(itemLineKeys).size !== itemLineKeys.length) {
+      throw new ValidationError(
+        'El carrito tiene líneas duplicadas (mismo producto y misma selección de complementos). Sumá la cantidad en una sola línea en vez de repetirla.',
+      );
     }
     const promotionIds = promotions.map((p) => p.promotionId);
     if (new Set(promotionIds).size !== promotionIds.length) {
@@ -482,6 +490,40 @@ export class OrdersService {
         : [];
     const productById = new Map(productRows.map((p) => [p.id, p]));
 
+    // Un complemento a excluir tiene que existir en EL PRODUCTO de esa
+    // línea puntual — no vale mandar "sin quirquiña" para un producto que
+    // no tiene quirquiña en su lista.
+    const itemsWithComplements = items.filter((i) => (i.excludedComplements ?? []).length > 0);
+    if (itemsWithComplements.length > 0) {
+      const complementRows = await trx
+        .selectFrom('product_complements')
+        .select(['product_id', 'name'])
+        .where(
+          'product_id',
+          'in',
+          itemsWithComplements.map((i) => i.productId),
+        )
+        .execute();
+      const validNamesByProduct = new Map<string, Set<string>>();
+      for (const row of complementRows) {
+        const set = validNamesByProduct.get(row.product_id) ?? new Set<string>();
+        set.add(row.name);
+        validNamesByProduct.set(row.product_id, set);
+      }
+      for (const item of itemsWithComplements) {
+        const validNames = validNamesByProduct.get(item.productId) ?? new Set<string>();
+        const unknown = (item.excludedComplements ?? []).find((name) => !validNames.has(name));
+        if (unknown !== undefined) {
+          throw new DomainException(
+            'unknown_complement',
+            HttpStatus.BAD_REQUEST,
+            `El producto no tiene un complemento llamado "${unknown}".`,
+            { productId: item.productId, complement: unknown },
+          );
+        }
+      }
+    }
+
     const inactiveProductIds = new Set<string>();
     const soldOutProductIds = new Set<string>();
     for (const id of allProductIds) {
@@ -538,7 +580,12 @@ export class OrdersService {
       const product = productById.get(i.productId)!;
       const lineSubtotal = Number(product.price) * i.quantity;
       subtotal += lineSubtotal;
-      return { product, quantity: i.quantity, subtotal: lineSubtotal };
+      return {
+        product,
+        quantity: i.quantity,
+        subtotal: lineSubtotal,
+        excludedComplements: i.excludedComplements ?? [],
+      };
     });
 
     const promotionLines = promotions.map((p) => {
@@ -606,6 +653,7 @@ export class OrdersService {
             unit_price_snapshot: line.product.price,
             quantity: line.quantity,
             subtotal: line.subtotal.toFixed(2),
+            excluded_complements: line.excludedComplements,
           })),
         )
         .execute();
@@ -1183,6 +1231,11 @@ function toLateOrderRequestAcceptedResponse(row: {
   };
 }
 
+/** Clave normalizada (orden-insensible) para comparar la selección de complementos excluidos de dos líneas. */
+function complementsKey(excluded: string[] | undefined): string {
+  return JSON.stringify([...(excluded ?? [])].sort());
+}
+
 function groupByOrderId<T extends { order_id: string }>(rows: T[]): Map<string, T[]> {
   const byOrder = new Map<string, T[]>();
   for (const row of rows) {
@@ -1240,6 +1293,7 @@ function toOrderResponse(
     unit_price_snapshot: string;
     quantity: number;
     subtotal: string;
+    excluded_complements: string[];
   }[],
   promotions: {
     promotion_id: string | null;
@@ -1284,6 +1338,7 @@ function toOrderResponse(
       unitPriceSnapshot: Number(item.unit_price_snapshot),
       quantity: item.quantity,
       subtotal: Number(item.subtotal),
+      excludedComplements: item.excluded_complements,
     })),
     promotions: promotions.map((promotion) => ({
       promotionId: promotion.promotion_id,

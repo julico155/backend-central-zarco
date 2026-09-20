@@ -87,6 +87,13 @@ fetch en cada render.
 Las promociones traen `revision`: guardalo, se necesita al armar el pedido
 (ver 4).
 
+**Complementos** (`complements[]` en cada producto, ej. tomate/lechuga/
+cebolla/quirquiña): en el detalle del producto dentro del carrito, mostralos
+**todos tildados por defecto** — el cajero solo destilda lo que el cliente NO
+quiere. No tienen precio propio, solo sirven para excluir ingredientes. Un
+producto sin complementos configurados trae `complements: []` (nada que
+mostrar).
+
 `GET /categories?includeInactive=true` y `GET /products?includeInactive=true`
 devuelven también las desactivadas/os — solo para la pantalla de
 mantenimiento de menú (para poder reactivarlas), no para vender.
@@ -120,15 +127,31 @@ Idempotency-Key: <uuid nuevo por cada intento de venta>
   "paymentMethod": "cash" | "qr",
   "bypassHoursGate": true,                 // el POS SIEMPRE puede vender fuera del horario de delivery de WhatsApp
   "notes": "sin cebolla",                  // opcional
-  "items": [ { "productId": "<uuid>", "quantity": 2 } ],
+  "items": [
+    { "productId": "<uuid>", "quantity": 3 },
+    { "productId": "<uuid>", "quantity": 1, "excludedComplements": ["quirquiña"] }
+  ],
   "promotions": [ { "promotionId": "<uuid>", "quantity": 1, "revision": 3 } ]  // revision = el que trajo GET /promotions
 }
 ```
 
 Límites del carrito: hasta 20 productos sueltos y 10 promociones, `quantity`
-entre 1 y 10 por línea, y **sin `productId` ni `promotionId` repetidos** — el
-carrito tiene que consolidar líneas iguales. Ojo: más de 10 unidades del mismo
-producto no se puede expresar.
+entre 1 y 10 por línea, y **sin `promotionId` repetidos**. Para `items`, lo
+que no puede repetirse es la combinación exacta `productId` + selección de
+complementos excluidos — dos líneas del mismo producto son válidas si tienen
+distinta selección (ver abajo), pero repetir la misma combinación en dos
+líneas da `400 validation_error` (sumá la cantidad en una sola línea en vez
+de repetirla). Ojo: más de 10 unidades de la misma combinación no se puede
+expresar en una sola línea.
+
+**Complementos por línea** (`excludedComplements`, opcional): un producto
+puede tener ingredientes que se pueden sacar (ver `complements[]` en el
+catálogo, sección 2). Si el cliente pide "3 trancapechos, 1 sin quirquiña",
+eso son **dos líneas del mismo `productId`**: una con `quantity: 3` sin el
+campo, y otra con `quantity: 1` y `excludedComplements: ["quirquiña"]` — no
+se puede mezclar en una sola línea porque cada unidad podría llevar una
+selección distinta. Mandar un nombre que el producto no tiene da
+`400 unknown_complement`.
 
 **`Idempotency-Key`**: generá un `uuid` v4 **al abrir el carrito**, no en el
 clic de confirmar — si lo generás en el clic, un doble clic manda dos keys
@@ -156,7 +179,8 @@ La respuesta trae el pedido completo — es lo que imprimís en el ticket:
 
 - `items[]` — **solo los productos sueltos**, con los nombres y precios
   congelados al momento de la venta (`productNameSnapshot`,
-  `unitPriceSnapshot`).
+  `unitPriceSnapshot`) y `excludedComplements[]` (imprimir en el ticket y
+  mandar a cocina, ej. "SIN QUIRQUIÑA").
 - `promotions[]` — los combos, cada uno con `promotionNameSnapshot`,
   `promoPriceSnapshot`, `comboQuantity` y `componentsSnapshot[]` (qué
   productos entraron en el combo, para el ticket y para cocina).
@@ -436,6 +460,7 @@ Todas necesitan el rol correcto:
 | Pantalla | Endpoints | Rol |
 |---|---|---|
 | Mantenimiento de menú | `POST/PATCH /categories`, `/products`, `/promotions` | `admin` |
+| Complementos de un producto | `complements: [{ "name": "..." }]` dentro del mismo `POST/PATCH /products` — mandarlo reemplaza la lista completa | `admin` |
 | Foto de producto | `POST /products/:id/image` (ver abajo) | `admin` |
 | Marcar producto agotado | `PATCH /products/:id/availability` | `admin` o `kitchen` |
 | Configuración del local (horario, recargo lluvia, ubicación) | `GET/PATCH /operational-settings` | lectura: cualquiera; escritura: `admin` |
@@ -544,6 +569,7 @@ Códigos que el POS puede encontrarse:
 | `not_found` | 404 | `details.resource` dice qué no se encontró |
 | `product_code_taken` / `username_taken` | 409 | Duplicado en alta de producto/staff |
 | `promotion_duplicate_product` | 400 | El mismo `productId` aparece dos veces en `items` de una promoción — usá `quantity` |
+| `unknown_complement` | 400 | `excludedComplements` trae un nombre que el producto no tiene; `details` dice cuál |
 | `validation_error` / `http_error` | 400 | Error de formulario |
 
 ## 10. Para probar mientras desarrollan

@@ -2,7 +2,11 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
+import {
+  DomainException,
+  NotFoundDomainError,
+  ValidationError,
+} from '../common/exceptions/domain-exception';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UploadProductImageDto } from './dto/upload-product-image.dto';
@@ -17,6 +21,12 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
 }
 
+export interface ProductComplementResponse {
+  id: string;
+  name: string;
+  sortOrder: number;
+}
+
 export interface ProductResponse {
   id: string;
   code: string;
@@ -29,6 +39,8 @@ export interface ProductResponse {
   sortOrder: number;
   /** Ruta relativa al backend, no una URL directa al bucket — mismo criterio que payment-proofs. Null si el producto no tiene foto. */
   imageUrl: string | null;
+  /** Todos van incluidos por defecto en el pedido; esta lista es solo lo que se puede destildar (ej. "sin quirquiña"). */
+  complements: ProductComplementResponse[];
 }
 
 @Injectable()
@@ -48,26 +60,44 @@ export class ProductsService {
     let query = this.db.selectFrom('products').selectAll();
     if (!includeInactive) query = query.where('is_active', '=', true);
     const rows = await query.orderBy('sort_order', 'asc').execute();
-    return rows.map(toProductResponse);
+    if (rows.length === 0) return [];
+
+    const complementRows = await this.db
+      .selectFrom('product_complements')
+      .selectAll()
+      .where(
+        'product_id',
+        'in',
+        rows.map((r) => r.id),
+      )
+      .orderBy('sort_order', 'asc')
+      .execute();
+    const complementsByProduct = groupComplementsByProduct(complementRows);
+
+    return rows.map((row) => toProductResponse(row, complementsByProduct.get(row.id) ?? []));
   }
 
   async create(dto: CreateProductDto): Promise<ProductResponse> {
     try {
-      const row = await this.db
-        .insertInto('products')
-        .values({
-          code: dto.code,
-          name: dto.name,
-          description: dto.description ?? null,
-          category_id: dto.categoryId,
-          price: dto.price.toFixed(2),
-          is_active: dto.isActive,
-          is_available: dto.isAvailable,
-          sort_order: dto.sortOrder,
-        })
-        .returningAll()
-        .executeTakeFirstOrThrow();
-      return toProductResponse(row);
+      return await this.db.transaction().execute(async (trx) => {
+        const row = await trx
+          .insertInto('products')
+          .values({
+            code: dto.code,
+            name: dto.name,
+            description: dto.description ?? null,
+            category_id: dto.categoryId,
+            price: dto.price.toFixed(2),
+            is_active: dto.isActive,
+            is_available: dto.isAvailable,
+            sort_order: dto.sortOrder,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+
+        const complements = await this.replaceComplements(trx, row.id, dto.complements);
+        return toProductResponse(row, complements);
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new DomainException(
@@ -81,23 +111,63 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<ProductResponse> {
-    const row = await this.db
-      .updateTable('products')
-      .set({
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.description !== undefined ? { description: dto.description } : {}),
-        ...(dto.categoryId !== undefined ? { category_id: dto.categoryId } : {}),
-        ...(dto.price !== undefined ? { price: dto.price.toFixed(2) } : {}),
-        ...(dto.isActive !== undefined ? { is_active: dto.isActive } : {}),
-        ...(dto.sortOrder !== undefined ? { sort_order: dto.sortOrder } : {}),
-        updated_at: new Date(),
-      })
-      .where('id', '=', id)
-      .returningAll()
-      .executeTakeFirst();
+    return this.db.transaction().execute(async (trx) => {
+      const row = await trx
+        .updateTable('products')
+        .set({
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.description !== undefined ? { description: dto.description } : {}),
+          ...(dto.categoryId !== undefined ? { category_id: dto.categoryId } : {}),
+          ...(dto.price !== undefined ? { price: dto.price.toFixed(2) } : {}),
+          ...(dto.isActive !== undefined ? { is_active: dto.isActive } : {}),
+          ...(dto.sortOrder !== undefined ? { sort_order: dto.sortOrder } : {}),
+          updated_at: new Date(),
+        })
+        .where('id', '=', id)
+        .returningAll()
+        .executeTakeFirst();
 
-    if (!row) throw new NotFoundDomainError('product', id);
-    return toProductResponse(row);
+      if (!row) throw new NotFoundDomainError('product', id);
+
+      const complements =
+        dto.complements !== undefined
+          ? await this.replaceComplements(trx, id, dto.complements)
+          : await trx
+              .selectFrom('product_complements')
+              .selectAll()
+              .where('product_id', '=', id)
+              .orderBy('sort_order', 'asc')
+              .execute();
+
+      return toProductResponse(row, complements);
+    });
+  }
+
+  /** Reemplaza la lista completa de complementos de un producto (mismo patrón que promotions.replaceItems). */
+  private async replaceComplements(
+    trx: Kysely<Database>,
+    productId: string,
+    complements: { name: string; sortOrder?: number }[] | undefined,
+  ) {
+    await trx.deleteFrom('product_complements').where('product_id', '=', productId).execute();
+    if (!complements || complements.length === 0) return [];
+
+    const names = complements.map((c) => c.name.trim());
+    if (new Set(names).size !== names.length) {
+      throw new ValidationError('El producto tiene complementos duplicados.');
+    }
+
+    return trx
+      .insertInto('product_complements')
+      .values(
+        complements.map((c, index) => ({
+          product_id: productId,
+          name: c.name.trim(),
+          sort_order: c.sortOrder ?? index,
+        })),
+      )
+      .returningAll()
+      .execute();
   }
 
   /** PATCH /products/:id/availability — toggle de staff, no afecta is_active. */
@@ -110,7 +180,7 @@ export class ProductsService {
       .executeTakeFirst();
 
     if (!row) throw new NotFoundDomainError('product', id);
-    return toProductResponse(row);
+    return toProductResponse(row, await this.loadComplements(id));
   }
 
   /** POST /products/:id/image — reemplaza la foto si ya había una (misma key, ver buildProductImageKey). */
@@ -135,7 +205,16 @@ export class ProductsService {
       .executeTakeFirst();
 
     if (!row) throw new NotFoundDomainError('product', id);
-    return toProductResponse(row);
+    return toProductResponse(row, await this.loadComplements(id));
+  }
+
+  private async loadComplements(productId: string) {
+    return this.db
+      .selectFrom('product_complements')
+      .selectAll()
+      .where('product_id', '=', productId)
+      .orderBy('sort_order', 'asc')
+      .execute();
   }
 
   /** GET /products/:id/image — nunca una URL directa al bucket, se sirve siempre a través del backend. */
@@ -158,18 +237,21 @@ export class ProductsService {
   }
 }
 
-function toProductResponse(row: {
-  id: string;
-  code: string;
-  name: string;
-  description: string | null;
-  category_id: string;
-  price: string;
-  is_active: boolean;
-  is_available: boolean;
-  sort_order: number;
-  image_key: string | null;
-}): ProductResponse {
+function toProductResponse(
+  row: {
+    id: string;
+    code: string;
+    name: string;
+    description: string | null;
+    category_id: string;
+    price: string;
+    is_active: boolean;
+    is_available: boolean;
+    sort_order: number;
+    image_key: string | null;
+  },
+  complements: { id: string; name: string; sort_order: number }[],
+): ProductResponse {
   return {
     id: row.id,
     code: row.code,
@@ -181,5 +263,18 @@ function toProductResponse(row: {
     isAvailable: row.is_available,
     sortOrder: row.sort_order,
     imageUrl: row.image_key ? `/products/${row.id}/image` : null,
+    complements: complements.map((c) => ({ id: c.id, name: c.name, sortOrder: c.sort_order })),
   };
+}
+
+function groupComplementsByProduct(
+  rows: { id: string; product_id: string; name: string; sort_order: number }[],
+) {
+  const byProduct = new Map<string, { id: string; name: string; sort_order: number }[]>();
+  for (const row of rows) {
+    const list = byProduct.get(row.product_id) ?? [];
+    list.push(row);
+    byProduct.set(row.product_id, list);
+  }
+  return byProduct;
 }

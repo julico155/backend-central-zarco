@@ -102,6 +102,12 @@ simulado:
   través del backend, nunca una URL directa al bucket, mismo adaptador de
   storage intercambiable (S3/R2 o disco local) que `payment-proofs`,
   reusando el mismo bucket.
+  **Complementos** (`product_complements`, ej. tomate/lechuga/cebolla/
+  quirquiña): lista por producto, sin precio propio (solo exclusión).
+  `complements[]` en `POST/PATCH /products` reemplaza la lista completa
+  (mismo patrón que `promotions.items`); `ProductResponse.complements[]`
+  siempre viene en el catálogo, para que el cliente sepa qué se puede
+  destildar.
 - **`orders`** — `POST /orders` porta `create_order_web_v5` (saas_smarky)
   completo: gate de horario en dos capas, porque el horario real no es fijo
   (varía ±1h noche a noche). `business_opens_hour`/`business_closes_hour`
@@ -129,6 +135,17 @@ simulado:
   el token de servicio o cualquier JWT. `cash/confirm` y la decisión QR que
   marca `accepted` vinculan el pedido a la caja abierta en ese momento (ver
   `cash-register` abajo) — exigen que haya una.
+
+  **Complementos por línea**: `items[].excludedComplements` (nombres a
+  sacar, ej. `["quirquiña"]`) — por defecto todos van incluidos. Dos líneas
+  del mismo `productId` son válidas si difieren en la selección (ej. "3
+  normales + 1 sin quirquiña" son dos `order_items`, nunca se fusionan
+  porque perderían cuál unidad lleva qué); repetir la misma combinación en
+  dos líneas da `400 validation_error`, y un nombre que el producto no
+  tiene da `400 unknown_complement`. Snapshot en
+  `order_items.excluded_complements` (texto, no id — igual que
+  `product_name_snapshot`, no se recalcula si después el admin edita el
+  catálogo).
 
   **QR nunca cobra el envío**: con `paymentMethod: 'qr'`, el monto cobrado
   (por `QrPaymentsService` y por el `confirm-presencial` manual) es siempre

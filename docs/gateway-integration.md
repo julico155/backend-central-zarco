@@ -49,6 +49,13 @@ Cada producto trae `imageUrl` — `null` si no tiene foto, o una ruta relativa
 que te devuelve a la Media API de WhatsApp (no es una URL pública que
 puedas pasarle directo a Meta).
 
+Cada producto también trae `complements[]` (ej. tomate, lechuga, cebolla,
+quirquiña) — ingredientes que el cliente puede pedir sacar. Por defecto van
+TODOS incluidos; si el cliente dice "sin quirquiña", usalo en el `item`
+correspondiente al armar el pedido (ver 2.3). Un producto sin complementos
+configurados trae `complements: []` — no le preguntes nada al cliente en
+ese caso.
+
 ### 2.3 Crear pedido
 
 ```
@@ -61,10 +68,21 @@ Idempotency-Key: <uuid único por intento — SIEMPRE, ver nota abajo>
   "deliveryType": "delivery" | "pickup" | "dine_in",   // pickup = para llevar, dine_in = comer en el local
   "paymentMethod": "qr" | "cash" | "card",
   "notes": "sin cebolla" ,           // opcional
-  "items": [ { "productId": "<uuid>", "quantity": 2 } ],
+  "items": [
+    { "productId": "<uuid>", "quantity": 3 },
+    { "productId": "<uuid>", "quantity": 1, "excludedComplements": ["quirquiña"] }
+  ],
   "promotions": [ { "promotionId": "<uuid>", "quantity": 1, "revision": 3 } ] // opcional; revision = el que te devolvió GET /promotions
 }
 ```
+
+**`excludedComplements`** (opcional, por línea): si el cliente pide "3
+trancapechos, uno sin quirquiña", eso son **dos líneas del mismo
+`productId`** — no se puede mezclar en una sola porque cada unidad puede
+llevar una selección distinta. Mandar un nombre que el producto no tiene en
+su `complements[]` (ver 2.2) da `400 unknown_complement`. Repetir la misma
+combinación producto+exclusión en dos líneas da `400 validation_error` —
+sumá la cantidad en una sola línea.
 
 Respuestas posibles:
 - **200/201** — pedido creado. `200` si repetiste la misma `Idempotency-Key` con el mismo cuerpo (no se duplicó, te devuelve el mismo pedido de antes).

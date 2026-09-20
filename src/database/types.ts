@@ -127,6 +127,16 @@ export interface OrderItemsTable {
   unit_price_snapshot: string;
   quantity: number;
   subtotal: string;
+  /** Snapshot de nombres de complementos excluidos en esta línea (ej. ["quirquiña"]) — nunca un id, ver migración. */
+  excluded_complements: string[];
+  created_at: Timestamp;
+}
+
+export interface ProductComplementsTable {
+  id: Generated<string>;
+  product_id: string;
+  name: string;
+  sort_order: Generated<number>;
   created_at: Timestamp;
 }
 
@@ -392,6 +402,7 @@ export interface NotificationJobsTable {
 export interface Database {
   categories: CategoriesTable;
   products: ProductsTable;
+  product_complements: ProductComplementsTable;
   customers: CustomersTable;
   idempotency_keys: IdempotencyKeysTable;
   orders: OrdersTable;

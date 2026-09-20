@@ -1,4 +1,6 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -7,7 +9,9 @@ import {
   IsUUID,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { ProductComplementInputDto } from './product-complement-input.dto';
 
 export class CreateProductDto {
   @IsString()
@@ -41,4 +45,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  // Todos tildados por defecto en el pedido — esta lista es solo el catálogo
+  // de qué se puede destildar (ej. tomate/lechuga/cebolla/quirquiña).
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductComplementInputDto)
+  complements?: ProductComplementInputDto[];
 }

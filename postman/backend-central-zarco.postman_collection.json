@@ -352,7 +352,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"coca-500\",\n  \"name\": \"Coca-Cola 500ml\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"price\": 10\n}"
+              "raw": "{\n  \"code\": \"coca-500\",\n  \"name\": \"Coca-Cola 500ml\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"price\": 10,\n  \"complements\": [\n    {\n      \"name\": \"hielo\"\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/products",
@@ -1209,6 +1209,40 @@
               }
             }
           ]
+        },
+        {
+          "name": "Crear pedido con complemento excluido (2 líneas mismo producto)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{posToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"channel\": \"pos\",\n  \"customerName\": \"Cliente de prueba\",\n  \"deliveryType\": \"dine_in\",\n  \"paymentMethod\": \"cash\",\n  \"bypassHoursGate\": true,\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 3\n    },\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1,\n      \"excludedComplements\": [\n        \"quirquiña\"\n      ]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "Dos líneas del mismo productId: una normal y otra sin un complemento del producto (ej. quirquiña). No se pueden fusionar en una sola línea porque cada unidad puede llevar una selección distinta."
+          }
         },
         {
           "name": "Crear pedido con delivery (canal whatsapp, dentro de horario)",

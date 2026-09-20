@@ -1,4 +1,6 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -7,7 +9,9 @@ import {
   IsUUID,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { ProductComplementInputDto } from './product-complement-input.dto';
 
 export class UpdateProductDto {
   @IsOptional()
@@ -36,4 +40,11 @@ export class UpdateProductDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  // Si viene, reemplaza la lista completa de complementos del producto.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductComplementInputDto)
+  complements?: ProductComplementInputDto[];
 }
