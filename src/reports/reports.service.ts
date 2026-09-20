@@ -290,6 +290,7 @@ export class ReportsService {
         unitPriceSnapshot: Number(i.unit_price_snapshot),
         quantity: i.quantity,
         subtotal: Number(i.subtotal),
+        excludedComplements: i.excluded_complements,
       })),
       promotions: promotions.map((p) => ({
         promotionId: p.promotion_id,
