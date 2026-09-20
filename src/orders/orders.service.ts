@@ -1,5 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Kysely, sql, Transaction } from 'kysely';
+import { AppConfig } from '../config/configuration';
 import { KYSELY } from '../database/database.module';
 import {
   Database,
@@ -130,6 +132,7 @@ export class OrdersService {
     private readonly notifications: NotificationsOutService,
     private readonly cashRegister: CashRegisterService,
     private readonly qrPayments: QrPaymentsService,
+    private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -270,7 +273,10 @@ export class OrdersService {
     // toca, cambia solo el contenido: ahora manda el QR real del banco en
     // vez de pedir una captura. Si el banco falla, cae al texto de pedir
     // captura como estaba antes (fallback, no rompe la creación del pedido).
-    if (order.paymentMethod === 'qr') {
+    const posManualMode =
+      order.channel === 'pos' && this.config.get('posQrMode', { infer: true }) === 'manual';
+
+    if (order.paymentMethod === 'qr' && !posManualMode) {
       let payload: { customerId: string; text: string; imageUrl?: string };
       try {
         const charge = await this.qrPayments.generateForOrder(order.id);

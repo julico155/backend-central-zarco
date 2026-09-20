@@ -1,9 +1,11 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { BankQrChargeStatus, Database } from '../database/types';
 import { DomainException, NotFoundDomainError, ValidationError } from '../common/exceptions/domain-exception';
 import { dateInBolivia } from '../common/time/service-window';
+import { AppConfig } from '../config/configuration';
 import { BanecoClientService } from '../baneco/baneco-client.service';
 import { PaymentAttemptsService } from '../payment-attempts/payment-attempts.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
@@ -49,6 +51,7 @@ export class QrPaymentsService {
     private readonly baneco: BanecoClientService,
     private readonly paymentAttempts: PaymentAttemptsService,
     private readonly notifications: NotificationsOutService,
+    private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
   /**
@@ -63,6 +66,7 @@ export class QrPaymentsService {
         'id',
         'order_number',
         'bank_reference',
+        'channel',
         'payment_method',
         'payment_status',
         'subtotal_amount',
@@ -74,6 +78,13 @@ export class QrPaymentsService {
     if (!order) throw new NotFoundDomainError('order', orderId);
     if (order.payment_method !== 'qr' && order.payment_method !== 'split') {
       throw new ValidationError('El pedido no es de pago QR.');
+    }
+    if (order.channel === 'pos' && this.config.get('posQrMode', { infer: true }) === 'manual') {
+      throw new DomainException(
+        'qr_manual_mode',
+        HttpStatus.CONFLICT,
+        'El QR del banco todavía no está habilitado para el POS. Confirmá el cobro a mano con POST /orders/:id/payment-attempts/confirm-presencial.',
+      );
     }
     if (order.payment_status === 'paid') {
       throw new DomainException(

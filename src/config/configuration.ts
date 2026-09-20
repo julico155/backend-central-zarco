@@ -37,6 +37,15 @@ export interface AppConfig {
     aesKey: string;
     account: string;
   };
+  /**
+   * 'manual' = mientras el banco no habilite producción: el POS nunca le
+   * pide un QR real a Baneco, el cajero confirma el cobro a ojo (con SU
+   * propio QR fuera del sistema) vía `confirm-presencial`. Solo afecta
+   * channel='pos' — WhatsApp sigue con el QR real de Baneco. Interruptor
+   * por variable de entorno (no una rama aparte) para no arrastrar un merge
+   * divergente: cuando el banco dé el ok, se saca la variable y listo.
+   */
+  posQrMode: 'bank' | 'manual';
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -93,4 +102,5 @@ export default (): AppConfig => ({
     aesKey: process.env.BANECO_AES_KEY ?? '',
     account: process.env.BANECO_ACCOUNT ?? '',
   },
+  posQrMode: process.env.POS_QR_MODE === 'manual' ? 'manual' : 'bank',
 });

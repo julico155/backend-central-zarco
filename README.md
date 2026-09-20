@@ -147,6 +147,20 @@ simulado:
   `product_name_snapshot`, no se recalcula si después el admin edita el
   catálogo).
 
+  **`POS_QR_MODE=manual`** (variable de entorno, mientras el banco no
+  habilite producción del QR): para `channel='pos'` únicamente,
+  `POST /orders/:id/qr/generate` responde `409 qr_manual_mode` en vez de
+  llamarlo — el front del POS no muestra ningún QR generado por el sistema;
+  el cajero verifica el pago a ojo (con su propio QR, fuera del sistema) y
+  confirma con `POST /orders/:id/payment-attempts/confirm-presencial`
+  (`{decision: "accepted"}`), que ya soportaba crear+decidir sin que exista
+  un `payment_attempt` previo. `notifyOrderCreated` tampoco intenta generar
+  el QR real ni le manda nada al cliente por WhatsApp para esos pedidos.
+  WhatsApp no se toca — sigue con el QR real de Baneco siempre. Sin la
+  variable (o con cualquier otro valor), comportamiento normal. Cuando el
+  banco apruebe producción, se saca la variable en Railway — sin tocar
+  código ni mergear ramas.
+
   **QR nunca cobra el envío**: con `paymentMethod: 'qr'`, el monto cobrado
   (por `QrPaymentsService` y por el `confirm-presencial` manual) es siempre
   `subtotal_amount` — nunca `total_amount`. Ya no hay contra entrega de la

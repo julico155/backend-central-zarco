@@ -319,6 +319,28 @@ después si necesitás el pedido actualizado para el ticket.
 
 No hay `card` — no es parte del alcance.
 
+#### Modo manual (mientras el banco no habilite producción)
+
+Con la variable de entorno `POS_QR_MODE=manual` en el backend, `POST
+/orders/:id/qr/generate` responde `409 qr_manual_mode` para pedidos del POS
+(el front **no debe llamarlo ni mostrar ningún QR generado por el
+sistema**). El flujo pasa a ser 100% manual:
+
+1. El cajero crea el pedido normal (`paymentMethod: "qr"`), igual que
+   siempre.
+2. En vez de un QR en pantalla, mostrale al cajero **un solo botón:
+   "Confirmar pago"**.
+3. El cajero muestra al cliente el QR de su propia cuenta bancaria (fuera
+   del sistema), verifica en su banca que entró el monto exacto, y aprieta
+   el botón — que llama al mismo `POST
+   /orders/:id/payment-attempts/confirm-presencial` con
+   `{"decision": "accepted"}` de arriba. No hace falta llamar
+   `qr/generate` antes, funciona igual (crea el intento y lo decide en el
+   mismo paso).
+
+Esta variable es temporal: cuando el banco dé el ok de producción, se saca
+de Railway y el flujo vuelve a ser el QR real de arriba, sin tocar código.
+
 ### Pago dividido (parte efectivo, parte QR)
 
 Para cuando el cliente paga una parte en efectivo y el resto por QR. El
@@ -570,6 +592,7 @@ Códigos que el POS puede encontrarse:
 | `product_code_taken` / `username_taken` | 409 | Duplicado en alta de producto/staff |
 | `promotion_duplicate_product` | 400 | El mismo `productId` aparece dos veces en `items` de una promoción — usá `quantity` |
 | `unknown_complement` | 400 | `excludedComplements` trae un nombre que el producto no tiene; `details` dice cuál |
+| `qr_manual_mode` | 409 | `POS_QR_MODE=manual` está activo — no llames `qr/generate`, usá `confirm-presencial` directo |
 | `validation_error` / `http_error` | 400 | Error de formulario |
 
 ## 10. Para probar mientras desarrollan
