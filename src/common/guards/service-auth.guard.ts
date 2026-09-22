@@ -4,8 +4,18 @@ import { timingSafeEqual } from 'node:crypto';
 import { Request } from 'express';
 import { AppConfig } from '../../config/configuration';
 
+/**
+ * Cómo se autenticó la request. No alcanza con `apiClient` para distinguirlas:
+ * ServiceOrStaffAuthGuard marca las sesiones de staff (JWT) con el api_client
+ * fijo 'pos', que también es un api_client de servicio válido. Las
+ * capacidades reservadas a servicios (ver `suppressNotifications` en
+ * OrdersService) tienen que mirar esto, no solo el nombre.
+ */
+export type ApiClientKind = 'service' | 'staff';
+
 export interface AuthenticatedRequest extends Request {
   apiClient: string;
+  apiClientKind: ApiClientKind;
 }
 
 /**
@@ -35,6 +45,7 @@ export class ServiceAuthGuard implements CanActivate {
     }
 
     request.apiClient = apiClient;
+    request.apiClientKind = 'service';
     return true;
   }
 }

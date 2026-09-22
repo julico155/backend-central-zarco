@@ -3,12 +3,21 @@ export interface ServiceAuthConfig {
   tokens: Record<string, string>;
 }
 
+export interface ShadowOrdersConfig {
+  /**
+   * api_clients de servicio autorizados a mandar `suppressNotifications` en
+   * POST /orders. Vacío (el default, y lo correcto en producción) = nadie.
+   */
+  apiClients: string[];
+}
+
 export interface AppConfig {
   port: number;
   databaseUrl: string;
   /** Orígenes permitidos por CORS. Vacío = ninguno (el backend queda solo para clientes que no son navegadores). */
   corsOrigins: string[];
   serviceAuth: ServiceAuthConfig;
+  shadowOrders: ShadowOrdersConfig;
   gateway: {
     baseUrl: string;
     authToken: string;
@@ -46,6 +55,14 @@ function parseServiceAuthTokens(raw: string | undefined): Record<string, string>
   return Object.fromEntries(entries);
 }
 
+function parseCsvList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 function parseCorsOrigins(raw: string | undefined): string[] {
   if (!raw) return [];
   return raw
@@ -60,6 +77,9 @@ export default (): AppConfig => ({
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   serviceAuth: {
     tokens: parseServiceAuthTokens(process.env.SERVICE_AUTH_TOKENS),
+  },
+  shadowOrders: {
+    apiClients: parseCsvList(process.env.SHADOW_ORDER_API_CLIENTS),
   },
   gateway: {
     baseUrl: process.env.GATEWAY_BASE_URL ?? '',

@@ -36,6 +36,7 @@ describe('ServiceOrStaffAuthGuard', () => {
 
     await expect(buildGuard().canActivate(context)).resolves.toBe(true);
     expect(request.apiClient).toBe('whatsapp-gateway');
+    expect(request.apiClientKind).toBe('service');
     expect(request.staffUser).toBeUndefined();
   });
 
@@ -55,6 +56,17 @@ describe('ServiceOrStaffAuthGuard', () => {
 
     await buildGuard().canActivate(context);
     expect(request.apiClient).toBe(STAFF_API_CLIENT);
+  });
+
+  // 'pos' es también un api_client de servicio válido: sin esta marca, una
+  // capacidad reservada a servicios (suppressNotifications) quedaría abierta a
+  // cualquier persona de staff logueada.
+  it('distingue la sesión de staff del bearer de servicio con el mismo api_client', async () => {
+    const context = contextWithHeader('Bearer staff-jwt');
+    const request = context.switchToHttp().getRequest<GuardedRequest>();
+
+    await buildGuard().canActivate(context);
+    expect(request.apiClientKind).toBe('staff');
   });
 
   it('rechaza un token que no es ni de servicio ni un JWT válido', async () => {

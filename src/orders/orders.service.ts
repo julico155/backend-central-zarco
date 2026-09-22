@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Kysely, sql, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import {
@@ -24,6 +25,15 @@ import { checkoutGateAt, lateRequestExpiryFor } from '../common/time/service-win
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
 import { DeliveryService } from '../delivery/delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
+import { AppConfig } from '../config/configuration';
+import { ApiClientKind } from '../common/guards/service-auth.guard';
+import {
+  canSuppressNotifications,
+  NotificationSuppressionNotAllowedError,
+  OrderNotifier,
+  shadowNotifier,
+  ShadowLateReviewNotSupportedError,
+} from './shadow-orders';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 export interface OrderItemResponse {
@@ -119,6 +129,7 @@ export class OrdersService {
     private readonly operationalSettings: OperationalSettingsService,
     private readonly deliveryService: DeliveryService,
     private readonly notifications: NotificationsOutService,
+    private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -187,7 +198,35 @@ export class OrdersService {
     dto: CreateOrderDto,
     idempotencyKey: string,
     apiClient: string,
+    apiClientKind: ApiClientKind = 'service',
   ): Promise<CreateOrderOutcome> {
+    // Se chequea antes que nada, incluso antes del gate de horario: si el
+    // llamador no está autorizado a silenciar avisos, la request se rechaza
+    // entera en vez de crear el pedido y mandar el aviso igual (que sería
+    // exactamente lo que la prueba en sombra intenta evitar).
+    const suppressNotifications = dto.suppressNotifications === true;
+    if (
+      suppressNotifications &&
+      !canSuppressNotifications(
+        apiClient,
+        apiClientKind,
+        this.config.get('shadowOrders', { infer: true }).apiClients,
+      )
+    ) {
+      throw new NotificationSuppressionNotAllowedError(apiClient);
+    }
+
+    // Un solo destino para TODOS los avisos que dispara este endpoint. En
+    // sombra es el sumidero, así que no hay forma de que se escape uno:
+    // ni order_received, ni qr_confirmation, ni late_request_alert.
+    const notifier: OrderNotifier = suppressNotifications
+      ? shadowNotifier((job) =>
+          this.logger.log(
+            `Aviso '${job.kind}' suprimido para ${job.targetRef} (pedido en modo sombra).`,
+          ),
+        )
+      : this.notifications;
+
     const settings = await this.operationalSettings.getRow();
     const now = new Date();
     const bypassAllowed = dto.bypassHoursGate === true && dto.channel === 'pos';
@@ -204,7 +243,13 @@ export class OrdersService {
     }
 
     if (gate.gate === 'late_review') {
-      const body = await this.createLateOrderRequest(dto, idempotencyKey, now);
+      // Cortamos ANTES del insert: una late_order_request sombra sería
+      // silenciosa al crearse pero ruidosa al aceptarse/rechazarse, porque la
+      // supresión no se persiste en la fila (ver ShadowLateReviewNotSupportedError).
+      if (suppressNotifications) {
+        throw new ShadowLateReviewNotSupportedError();
+      }
+      const body = await this.createLateOrderRequest(dto, idempotencyKey, now, notifier);
       return { httpStatus: 202, body };
     }
 
@@ -213,7 +258,7 @@ export class OrdersService {
       endpoint: 'POST /orders',
       idempotencyKey,
       requestBody: dto,
-      execute: (trx) => this.executeCreateOrder(trx, dto),
+      execute: (trx) => this.executeCreateOrder(trx, dto, notifier),
     });
 
     return { httpStatus: outcome.created ? 201 : 200, body: outcome.body };
@@ -222,6 +267,7 @@ export class OrdersService {
   private async executeCreateOrder(
     trx: Transaction<Database>,
     dto: CreateOrderDto,
+    notifier: OrderNotifier = this.notifications,
   ): Promise<{ status: number; body: OrderResponse }> {
     const order = await this.createOrderInTransaction(trx, {
       customerId: dto.customerId ?? null,
@@ -240,7 +286,7 @@ export class OrdersService {
 
     if (order.customerId) {
       try {
-        await this.notifications.notifyNow({
+        await notifier.notifyNow({
           channel: 'whatsapp',
           kind: 'order_received',
           targetRef: order.id,
@@ -262,7 +308,7 @@ export class OrdersService {
       // y quedará como confirmation_external_message_id en notification_jobs.
       if (order.paymentMethod === 'qr') {
         try {
-          await this.notifications.notifyNow({
+          await notifier.notifyNow({
             channel: 'whatsapp',
             kind: 'qr_confirmation',
             targetRef: order.id,
@@ -553,6 +599,7 @@ export class OrdersService {
     dto: CreateOrderDto,
     idempotencyKey: string,
     now: Date,
+    notifier: OrderNotifier = this.notifications,
   ): Promise<LateOrderRequestAcceptedResponse> {
     const existing = await this.db
       .selectFrom('late_order_requests')
@@ -627,7 +674,7 @@ export class OrdersService {
 
     if (inserted) {
       try {
-        await this.notifications.notifyNow({
+        await notifier.notifyNow({
           channel: 'telegram',
           kind: 'late_request_alert',
           targetRef: inserted.id,

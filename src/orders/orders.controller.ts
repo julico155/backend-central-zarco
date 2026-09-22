@@ -17,6 +17,8 @@ import { ServiceAuthGuard } from '../common/guards/service-auth.guard';
 import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
 import { IdempotencyKey } from '../common/decorators/idempotency-key.decorator';
 import { ApiClient } from '../common/decorators/api-client.decorator';
+import { ApiClientKind } from '../common/decorators/api-client-kind.decorator';
+import { ApiClientKind as ApiClientKindValue } from '../common/guards/service-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -77,9 +79,10 @@ export class OrdersController {
     @Body() dto: CreateOrderDto,
     @IdempotencyKey() idempotencyKey: string,
     @ApiClient() apiClient: string,
+    @ApiClientKind() apiClientKind: ApiClientKindValue,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const outcome = await this.orders.create(dto, idempotencyKey, apiClient);
+    const outcome = await this.orders.create(dto, idempotencyKey, apiClient, apiClientKind);
     res.status(outcome.httpStatus);
     return outcome.body;
   }

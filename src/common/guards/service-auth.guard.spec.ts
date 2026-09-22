@@ -47,5 +47,6 @@ describe('ServiceAuthGuard', () => {
 
     expect(guard.canActivate(context)).toBe(true);
     expect(request.apiClient).toBe('whatsapp-gateway');
+    expect(request.apiClientKind).toBe('service');
   });
 });

@@ -29,7 +29,9 @@ export class ServiceOrStaffAuthGuard implements CanActivate {
     }
 
     await this.jwtAuth.canActivate(context);
-    context.switchToHttp().getRequest<AuthenticatedRequest>().apiClient = STAFF_API_CLIENT;
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    request.apiClient = STAFF_API_CLIENT;
+    request.apiClientKind = 'staff';
     return true;
   }
 }
