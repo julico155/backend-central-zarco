@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
 import { CommonModule } from '../common/common.module';
 import { OperationalSettingsModule } from '../operational-settings/operational-settings.module';
+import { LogisticsDispatchModule } from '../logistics-dispatch/logistics-dispatch.module';
 import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
 import { DeliveryTariffService } from './delivery-tariff.service';
@@ -10,7 +11,7 @@ import { DISTANCE_SERVICE, DistanceService, HaversineDistanceService } from './d
 import { MapboxDistanceService } from './distance/mapbox-distance.service';
 
 @Module({
-  imports: [CommonModule, OperationalSettingsModule],
+  imports: [CommonModule, OperationalSettingsModule, LogisticsDispatchModule],
   controllers: [DeliveryController],
   providers: [
     DeliveryService,

@@ -1,4 +1,4 @@
-import { IsLatitude, IsLongitude } from 'class-validator';
+import { IsLatitude, IsLongitude, IsString, Matches } from 'class-validator';
 
 export class AttachLocationDto {
   @IsLatitude()
@@ -6,4 +6,8 @@ export class AttachLocationDto {
 
   @IsLongitude()
   longitude!: number;
+
+  @IsString()
+  @Matches(/\S/)
+  dropoffAddress!: string;
 }

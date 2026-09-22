@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
 import {
@@ -11,6 +11,7 @@ import { OperationalSettingsService } from '../operational-settings/operational-
 import { DeliveryTariffService } from './delivery-tariff.service';
 import { DISTANCE_SERVICE, DistanceService } from './distance/distance.service';
 import { QuoteDeliveryDto } from './dto/quote-delivery.dto';
+import { LogisticsDispatchJobsService } from '../logistics-dispatch/logistics-dispatch-jobs.service';
 
 export interface StandaloneQuoteResponse {
   id: string;
@@ -45,6 +46,7 @@ export class DeliveryService {
     private readonly tariff: DeliveryTariffService,
     @Inject(DISTANCE_SERVICE) private readonly distance: DistanceService,
     private readonly operationalSettings: OperationalSettingsService,
+    private readonly logisticsDispatchJobs: LogisticsDispatchJobsService,
   ) {}
 
   /** POST /delivery/quotes — standalone, sin pedido asociado todavía. */
@@ -211,6 +213,12 @@ export class DeliveryService {
         .where('id', '=', order.id)
         .execute();
 
+      await this.enqueueConfirmedDelivery(trx, {
+        ...order,
+        delivery_base_amount: fee.amount.toFixed(2),
+        delivery_surcharge_amount: surcharge.toFixed(2),
+      }, origin.latitude, origin.longitude);
+
       return {
         result: 'applied',
         orderId: order.id,
@@ -293,6 +301,7 @@ export class DeliveryService {
       }
 
       const settings = await this.operationalSettings.getRow();
+      const origin = this.requireRestaurantOrigin(settings);
       const surcharge = settings.rain_surcharge_enabled
         ? Number(settings.rain_surcharge_amount)
         : 0;
@@ -310,6 +319,12 @@ export class DeliveryService {
         })
         .where('id', '=', order.id)
         .execute();
+
+      await this.enqueueConfirmedDelivery(trx, {
+        ...order,
+        delivery_base_amount: amount.toFixed(2),
+        delivery_surcharge_amount: surcharge.toFixed(2),
+      }, origin.latitude, origin.longitude);
 
       return {
         result: 'applied',
@@ -336,6 +351,38 @@ export class DeliveryService {
       );
     }
     return { latitude: settings.restaurant_latitude, longitude: settings.restaurant_longitude };
+  }
+
+  private async enqueueConfirmedDelivery(
+    trx: Transaction<Database>,
+    order: {
+      id: string;
+      customer_id: string | null;
+      customer_name: string;
+      notes: string | null;
+      delivery_base_amount: string;
+      delivery_surcharge_amount: string;
+      delivery_latitude: number | null;
+      delivery_longitude: number | null;
+      dropoff_address: string | null;
+    },
+    pickupLatitude: number,
+    pickupLongitude: number,
+  ): Promise<void> {
+    const customer = order.customer_id === null
+      ? undefined
+      : await trx
+          .selectFrom('customers')
+          .select('phone')
+          .where('id', '=', order.customer_id)
+          .executeTakeFirst();
+
+    await this.logisticsDispatchJobs.enqueueConfirmedDelivery(trx, {
+      order,
+      customerPhone: customer?.phone ?? null,
+      pickupLatitude,
+      pickupLongitude,
+    });
   }
 }
 

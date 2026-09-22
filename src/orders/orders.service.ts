@@ -728,7 +728,7 @@ export class OrdersService {
   /** Dispara la cotización de delivery atada al pedido (ver DeliveryService.quoteForOrder). */
   async attachLocation(
     orderId: string,
-    location: { latitude: number; longitude: number },
+    location: { latitude: number; longitude: number; dropoffAddress: string },
   ): Promise<OrderResponse> {
     const order = await this.db
       .selectFrom('orders')
@@ -745,6 +745,7 @@ export class OrdersService {
       .set({
         delivery_latitude: location.latitude,
         delivery_longitude: location.longitude,
+        dropoff_address: location.dropoffAddress.trim(),
         updated_at: new Date(),
       })
       .where('id', '=', orderId)

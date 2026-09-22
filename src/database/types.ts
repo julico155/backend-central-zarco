@@ -94,10 +94,32 @@ export interface OrdersTable {
   delivery_distance_meters: number | null;
   delivery_latitude: number | null;
   delivery_longitude: number | null;
+  dropoff_address: string | null;
   delivery_fee_paid: Generated<boolean>;
   cash_confirmed_at: Timestamp | null;
   confirmed_at: Timestamp | null;
   status_updated_by: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export type LogisticsDispatchJobStatus = 'pending' | 'sending' | 'succeeded' | 'failed';
+
+export interface LogisticsDispatchJobsTable {
+  id: Generated<string>;
+  order_id: string;
+  source_system: string;
+  external_order_id: string;
+  payload: JSONColumnType<Record<string, unknown>>;
+  status: Generated<LogisticsDispatchJobStatus>;
+  attempts: Generated<number>;
+  next_attempt_at: Timestamp;
+  claim_token: string | null;
+  claimed_until: Timestamp | null;
+  logistics_delivery_id: string | null;
+  remote_status_code: number | null;
+  last_error_code: string | null;
+  completed_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -307,6 +329,7 @@ export interface Database {
   customers: CustomersTable;
   idempotency_keys: IdempotencyKeysTable;
   orders: OrdersTable;
+  logistics_dispatch_jobs: LogisticsDispatchJobsTable;
   order_items: OrderItemsTable;
   late_order_requests: LateOrderRequestsTable;
   delivery_tariff_bands: DeliveryTariffBandsTable;

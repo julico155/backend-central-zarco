@@ -11,6 +11,17 @@ export interface ShadowOrdersConfig {
   apiClients: string[];
 }
 
+export interface LogisticsDispatchConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiToken: string;
+  tenantId: string;
+  restaurantId: string;
+  branchId: string;
+  pickupAddress: string | null;
+  requestTimeoutMs: number;
+}
+
 export interface AppConfig {
   port: number;
   databaseUrl: string;
@@ -18,6 +29,7 @@ export interface AppConfig {
   corsOrigins: string[];
   serviceAuth: ServiceAuthConfig;
   shadowOrders: ShadowOrdersConfig;
+  logisticsDispatch: LogisticsDispatchConfig;
   gateway: {
     baseUrl: string;
     authToken: string;
@@ -80,6 +92,16 @@ export default (): AppConfig => ({
   },
   shadowOrders: {
     apiClients: parseCsvList(process.env.SHADOW_ORDER_API_CLIENTS),
+  },
+  logisticsDispatch: {
+    enabled: process.env.LOGISTICS_DISPATCH_ENABLED === 'true',
+    baseUrl: process.env.LOGISTICS_BASE_URL ?? '',
+    apiToken: process.env.LOGISTICS_API_TOKEN ?? '',
+    tenantId: process.env.LOGISTICS_TENANT_ID ?? '',
+    restaurantId: process.env.LOGISTICS_RESTAURANT_ID ?? '',
+    branchId: process.env.LOGISTICS_BRANCH_ID ?? '',
+    pickupAddress: process.env.LOGISTICS_PICKUP_ADDRESS?.trim() || null,
+    requestTimeoutMs: Number(process.env.LOGISTICS_REQUEST_TIMEOUT_MS ?? 5000),
   },
   gateway: {
     baseUrl: process.env.GATEWAY_BASE_URL ?? '',
