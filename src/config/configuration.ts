@@ -96,7 +96,8 @@ export default (): AppConfig => ({
     endpoint: process.env.PAYMENT_PROOFS_S3_ENDPOINT ?? '',
   },
   baneco: {
-    baseUrl: process.env.BANECO_BASE_URL ?? '',
+    // Sin "/" final: el cliente arma `${baseUrl}/api/...` y una barra de más da 404 en el gateway del banco.
+    baseUrl: (process.env.BANECO_BASE_URL ?? '').replace(/\/+$/, ''),
     username: process.env.BANECO_USERNAME ?? '',
     password: process.env.BANECO_PASSWORD ?? '',
     aesKey: process.env.BANECO_AES_KEY ?? '',

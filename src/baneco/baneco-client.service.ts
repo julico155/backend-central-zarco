@@ -1,3 +1,5 @@
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
@@ -120,15 +122,7 @@ export class BanecoClientService {
     const { baseUrl } = this.config.get('baneco', { infer: true });
     const token = this.cachedToken ?? (await this.authenticate());
 
-    const doRequest = async (bearer: string) =>
-      fetch(`${baseUrl}${path}`, {
-        method,
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${bearer}`,
-        },
-        body: JSON.stringify(body),
-      });
+    const doRequest = (bearer: string) => sendJson(method, `${baseUrl}${path}`, bearer, body);
 
     let response = await doRequest(token);
     if (response.status === 401) {
@@ -137,11 +131,55 @@ export class BanecoClientService {
       response = await doRequest(freshToken);
     }
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      this.logger.warn(`Baneco ${method} ${path} -> ${response.status} ${text}`);
+    if (response.status < 200 || response.status >= 300) {
+      this.logger.warn(`Baneco ${method} ${path} -> ${response.status} ${response.text}`);
       throw new Error(`Baneco ${method} ${path} -> HTTP ${response.status}`);
     }
-    return (await response.json()) as T;
+    return JSON.parse(response.text) as T;
   }
+}
+
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * `fetch` (undici) prohíbe body en un GET, pero statusQR del banco lo exige
+ * (así lo validó su propio manual) — por eso las llamadas autenticadas van por
+ * `http(s).request`, que sí lo permite.
+ */
+function sendJson(
+  method: string,
+  url: string,
+  bearer: string,
+  body: unknown,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const payload = JSON.stringify(body);
+    const send = target.protocol === 'http:' ? httpRequest : httpsRequest;
+    const req = send(
+      {
+        method,
+        hostname: target.hostname,
+        port: target.port || undefined,
+        path: target.pathname + target.search,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          authorization: `Bearer ${bearer}`,
+        },
+        timeout: REQUEST_TIMEOUT_MS,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }),
+        );
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error(`timeout de ${REQUEST_TIMEOUT_MS}ms`)));
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
 }
