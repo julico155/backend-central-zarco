@@ -1,5 +1,26 @@
 import { DomainException, ValidationError } from '../common/exceptions/domain-exception';
-import { resolveOrderChannel } from './order-channel';
+import { assertPaymentMethodAllowed, resolveOrderChannel } from './order-channel';
+
+describe('assertPaymentMethodAllowed', () => {
+  it('WhatsApp solo acepta QR', () => {
+    expect(() => assertPaymentMethodAllowed('whatsapp', 'qr')).not.toThrow();
+    for (const method of ['cash', 'card', 'split'] as const) {
+      try {
+        assertPaymentMethodAllowed('whatsapp', method);
+        fail('debía lanzar');
+      } catch (error) {
+        expect((error as DomainException).code).toBe('payment_method_not_allowed');
+        expect((error as DomainException).getStatus()).toBe(400);
+      }
+    }
+  });
+
+  it('el POS conserva sus métodos', () => {
+    for (const method of ['qr', 'cash', 'split'] as const) {
+      expect(() => assertPaymentMethodAllowed('pos', method)).not.toThrow();
+    }
+  });
+});
 
 describe('resolveOrderChannel', () => {
   it('el JWT de staff es pos y el token del agente es whatsapp', () => {

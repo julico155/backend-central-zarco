@@ -91,8 +91,17 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   fallback manual: `POST /orders/:id/payment-attempts/confirm-presencial`
   (no devuelve el pedido, devuelve `{attempt, won}` — pedí `GET /orders/:id`
   después para el ticket).
+- **Vencimiento de pedidos sin pagar**: un pedido que a los **10 minutos**
+  sigue `unpaid` se cancela solo (`status: cancelled`, `statusUpdatedBy:
+  "system"`) y, si tenía QR, se anula en el banco. Aplica al POS igual que a
+  WhatsApp; no se cancelan los que ya tienen algo cobrado (una pata de split,
+  un pago bancario detectado). El POS debe tratar un pedido que pasa a
+  `cancelled` mientras espera el cobro como vencido, no como error. Si el
+  banco falla al generar el QR, el fallback es
+  `POST /orders/:id/payment-attempts/confirm-presencial` (el cajero confirma
+  a mano), dentro de esos 10 minutos.
 - **`GET /orders` (tablero, rol `kitchen`/`cashier`/`admin`)**: filtros
-  `customer_id`, `status`, `delivery_type`, `payment_status` (todos
+  `customer_id`, `status`, `delivery_type`, `payment_status`, `channel` (todos
   snake_case). Array pelado sin `total`. `limit` se recorta a 200 en
   silencio. `status` inválido devuelve `[]` sin avisar. No hay websockets —
   polling cada 5-10s.

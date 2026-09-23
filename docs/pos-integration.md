@@ -5,7 +5,7 @@ tiene toda la lógica de negocio (menú, pedidos, delivery, pagos) — el POS
 es un cliente que solo llama a esta API, no reimplementa nada de eso.
 
 **Alcance del POS**: `pickup` (para llevar desde el mostrador) y `dine_in`
-(para comer en el local, mesa), sin delivery. Pago en `cash` o `qr`
+(para comer en el local, mesa), sin delivery. Un pedido que no se cobra en 10 minutos se cancela solo. Pago en `cash` o `qr`
 (no habrá `card`). El QR hoy es comprobante manual por foto; pronto se
 integra una API de banco para QR real — cuando eso pase, el flujo de cobro
 por QR va a cambiar y este doc se actualiza.

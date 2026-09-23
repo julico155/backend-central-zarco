@@ -1222,6 +1222,97 @@ export class OrdersService {
     const { items, promotions } = await loadOrderLines(this.db, orderId);
     return toOrderResponse(updated, items, promotions);
   }
+
+  /**
+   * Cancela los pedidos que siguen sin pagar pasado `ttlMinutes` (WhatsApp y
+   * POS por igual): cocina no puede empezar un pedido impago, así que no tiene
+   * sentido dejarlos vivos. Se salvan los que ya tienen algo cobrado (una pata
+   * de split, un pago bancario detectado) y el contra entrega en efectivo, que
+   * se cobra al llegar. Devuelve cuántos canceló.
+   */
+  async expireUnpaidOrders(ttlMinutes: number): Promise<number> {
+    const cancellable: OrderStatus[] = ['draft', 'awaiting_location', 'confirmed'];
+    const cutoff = new Date(Date.now() - ttlMinutes * 60_000);
+
+    const candidates = await this.db
+      .selectFrom('orders')
+      .select(['id', 'order_number', 'customer_id', 'channel', 'payment_method'])
+      .where('status', 'in', cancellable)
+      .where('payment_status', '=', 'unpaid')
+      .where('created_at', '<', cutoff)
+      .where('cash_confirmed_at', 'is', null)
+      .where('split_cash_confirmed_at', 'is', null)
+      .where((eb) => eb.not(eb.and([eb('delivery_type', '=', 'delivery'), eb('payment_method', '=', 'cash')])))
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('bank_qr_charges')
+              .select('bank_qr_charges.id')
+              .whereRef('bank_qr_charges.order_id', '=', 'orders.id')
+              .where((cb) =>
+                cb.or([
+                  cb('bank_qr_charges.status', 'in', ['confirmed', 'paid_unapplied']),
+                  cb('bank_qr_charges.paid_detected_at', 'is not', null),
+                ]),
+              ),
+          ),
+        ),
+      )
+      .orderBy('created_at')
+      .limit(50)
+      .execute();
+
+    let expired = 0;
+    for (const order of candidates) {
+      try {
+        // Última mirada al banco antes de cancelar: si el cliente pagó en el
+        // último momento, el polling de 5s todavía podría no haberlo visto.
+        if (order.payment_method === 'qr' || order.payment_method === 'split') {
+          const pending = await this.db
+            .selectFrom('bank_qr_charges')
+            .select('qr_id')
+            .where('order_id', '=', order.id)
+            .where('status', '=', 'pending')
+            .execute();
+          for (const charge of pending) await this.qrPayments.resolveCharge(charge.qr_id);
+        }
+
+        // El WHERE repite las condiciones clave: si el pago entró mientras
+        // tanto, no se cancela.
+        const cancelled = await this.db
+          .updateTable('orders')
+          .set({ status: 'cancelled', status_updated_by: 'system', updated_at: new Date() })
+          .where('id', '=', order.id)
+          .where('payment_status', '=', 'unpaid')
+          .where('status', 'in', cancellable)
+          .returning('id')
+          .executeTakeFirst();
+        if (!cancelled) continue;
+        expired += 1;
+
+        if (order.payment_method === 'qr' || order.payment_method === 'split') {
+          await this.qrPayments.cancelForOrder(order.id);
+        }
+        if (order.channel === 'whatsapp' && order.customer_id) {
+          await this.notifications.notifyNow({
+            channel: 'whatsapp',
+            kind: 'order_expired_unpaid',
+            targetRef: order.id,
+            payload: {
+              customerId: order.customer_id,
+              text: `Cancelamos tu pedido ${order.order_number} porque no recibimos el pago a tiempo. Si todavía lo querés, podés hacer un pedido nuevo.`,
+            },
+          });
+        }
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo vencer el pedido ${order.order_number}: ${(error as Error).message}`,
+        );
+      }
+    }
+    return expired;
+  }
 }
 
 function toLateOrderRequestAcceptedResponse(row: {

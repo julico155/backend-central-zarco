@@ -8,6 +8,7 @@ import { CashRegisterModule } from '../cash-register/cash-register.module';
 import { BankQrModule } from '../bank-qr/bank-qr.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { OrdersService } from './orders.service';
     BankQrModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService, UnpaidOrdersExpiryCron],
   exports: [OrdersService],
 })
 export class OrdersModule {}

@@ -24,7 +24,7 @@ import { CurrentStaffUser } from '../auth/current-staff-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { OrderChannel, OrderDeliveryType, OrderPaymentStatus, OrderStatus } from '../database/types';
 import { OrdersService } from './orders.service';
-import { resolveOrderChannel } from './order-channel';
+import { assertPaymentMethodAllowed, resolveOrderChannel } from './order-channel';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AttachLocationDto } from './dto/attach-location.dto';
 import { KitchenNoteDto } from './dto/kitchen-note.dto';
@@ -85,6 +85,7 @@ export class OrdersController {
     @Res({ passthrough: true }) res: Response,
   ) {
     dto.channel = resolveOrderChannel(apiClient, dto.channel);
+    assertPaymentMethodAllowed(dto.channel, dto.paymentMethod);
     const outcome = await this.orders.create(dto, idempotencyKey, apiClient);
     res.status(outcome.httpStatus);
     return outcome.body;
@@ -126,14 +127,16 @@ export class OrdersController {
     return this.orders.setSplitPayment(id, dto.cashAmount, dto.qrAmount);
   }
 
+  // Solo JWT de staff: el token de servicio del agente de WhatsApp ya no puede
+  // marcar cobros en efectivo (un token filtrado daría pedidos por pagados).
   @Post('orders/:id/cash/confirm')
-  @UseGuards(ServiceOrStaffAuthGuard)
+  @UseGuards(JwtAuthGuard)
   confirmCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.confirmCash(id);
   }
 
   @Post('orders/:id/cash/cancel')
-  @UseGuards(ServiceOrStaffAuthGuard)
+  @UseGuards(JwtAuthGuard)
   cancelCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.cancelCash(id);
   }

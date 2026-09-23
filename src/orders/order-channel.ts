@@ -1,7 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException, ValidationError } from '../common/exceptions/domain-exception';
 import { STAFF_API_CLIENT } from '../common/guards/service-or-staff-auth.guard';
-import { OrderChannel } from '../database/types';
+import { OrderChannel, OrderPaymentMethod } from '../database/types';
 
 /**
  * Canal de origen de un pedido según la CREDENCIAL con que llegó, nunca según
@@ -14,6 +14,25 @@ const CHANNEL_BY_API_CLIENT: Record<string, OrderChannel> = {
   'whatsapp-gateway': 'whatsapp',
   web: 'web',
 };
+
+/**
+ * Reglas de pago por canal. WhatsApp solo cobra por QR (delivery, pickup y
+ * mesa): no hay persona presente que reciba efectivo, y un pedido sin pagar no
+ * debe llegar a cocina. El POS conserva sus métodos (efectivo, QR y split).
+ */
+export function assertPaymentMethodAllowed(
+  channel: OrderChannel,
+  paymentMethod: OrderPaymentMethod,
+): void {
+  if (channel === 'whatsapp' && paymentMethod !== 'qr') {
+    throw new DomainException(
+      'payment_method_not_allowed',
+      HttpStatus.BAD_REQUEST,
+      'Los pedidos de WhatsApp solo se pagan por QR.',
+      { channel, paymentMethod, allowed: ['qr'] },
+    );
+  }
+}
 
 export function resolveOrderChannel(apiClient: string, declared?: OrderChannel): OrderChannel {
   const channel = CHANNEL_BY_API_CLIENT[apiClient];

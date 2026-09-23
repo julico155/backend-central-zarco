@@ -66,7 +66,7 @@ Idempotency-Key: <uuid único por intento — SIEMPRE, ver nota abajo>
   "channel": "whatsapp",             // opcional: el canal se deriva de tu token (whatsapp-gateway = whatsapp); si lo mandás y no coincide, 400 channel_mismatch
   "customerName": "Juan Pérez",
   "deliveryType": "delivery" | "pickup" | "dine_in",   // pickup = para llevar, dine_in = comer en el local
-  "paymentMethod": "qr" | "cash" | "card",
+  "paymentMethod": "qr",                 // WhatsApp solo acepta qr; cualquier otro método da 400 payment_method_not_allowed
   "notes": "sin cebolla" ,           // opcional
   "items": [
     { "productId": "<uuid>", "quantity": 3 },
@@ -116,6 +116,14 @@ que le pagás al repartidor al recibir."* Si le decís un solo número
 confundir cuando el repartidor le pida el envío en efectivo.
 
 ### 2.5 Pago QR
+
+**Reglas de pago de WhatsApp**: todos los pedidos (delivery, pickup y mesa)
+se pagan **solo por QR** — no hay efectivo ni tarjeta por este canal. Un
+pedido que no se paga en **10 minutos** se cancela solo (se anula su QR en el
+banco y le llega al cliente un mensaje saliente normal avisándole que el
+pedido fue cancelado y que puede hacer uno nuevo). Además, el token del
+agente ya **no** puede confirmar ni cancelar cobros en efectivo
+(`cash/confirm` y `cash/cancel` son solo para staff).
 
 Para pedidos con `paymentMethod: "qr"`, el backend genera un QR real del
 banco apenas se crea el pedido (por `subtotalAmount`, ver arriba) y te lo

@@ -46,6 +46,8 @@ export interface AppConfig {
    * divergente: cuando el banco dé el ok, se saca la variable y listo.
    */
   posQrMode: 'bank' | 'manual';
+  /** Minutos tras los que un pedido sin pagar se cancela solo (WhatsApp y POS). */
+  unpaidOrderTtlMinutes: number;
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -104,4 +106,6 @@ export default (): AppConfig => ({
     account: process.env.BANECO_ACCOUNT ?? '',
   },
   posQrMode: process.env.POS_QR_MODE === 'manual' ? 'manual' : 'bank',
+  unpaidOrderTtlMinutes:
+    Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 10,
 });
