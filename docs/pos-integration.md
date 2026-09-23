@@ -377,7 +377,7 @@ ya estuviera aceptada — sin las dos, no está pagado. El cuadre de caja del
 cierre (sección 5) ya reparte un split entre el total en efectivo y el
 total en QR correctamente, no lo cuenta entero de un solo lado.
 
-## 7. Tablero de pedidos (cocina) y cuadre con las motos
+## 7. Tablero de pedidos (cocina)
 
 **`GET /orders` requiere rol `kitchen`, `cashier` o `admin`.** La idea es
 que cada persona se loguee en su pantalla, así queda registrado quién
@@ -420,57 +420,19 @@ pantallas de cocina abiertas **va a pasar**: refrescá el pedido y mostrá el
 estado actual, no un error rojo.
 
 El backend bloquea `confirmed → preparing` con `409 payment_required` si
-`paymentStatus` no es `paid` — **excepto** para pedidos de delivery
-pagados en efectivo (`deliveryType: 'delivery'` + `paymentMethod: 'cash'`):
-ese es el único caso real de pago contra entrega, el repartidor cobra al
-llegar, así que ahí `preparing` no exige pago todavía. Como el POS solo
-vende `pickup`, esto no te afecta al crear pedidos — sí importa si el
-mismo tablero de cocina muestra también pedidos de delivery que vinieron
-por WhatsApp: para esos vas a ver `preparing` con `paymentStatus: 'unpaid'`
-legítimamente, no lo marques como error.
-
-Para todo lo demás (pickup con cualquier método, o delivery con QR — un
-QR no se "entrega") sí hay que confirmar el pago (`cash/confirm` o QR)
-antes de mandar a cocina. Las transiciones posteriores
+`paymentStatus` no es `paid`, para **todos** los pedidos (pickup, mesa y
+delivery): ya no hay pago contra entrega de la comida — se cobra siempre
+antes de mandar a cocina (`cash/confirm` o QR). Las transiciones posteriores
 (`preparing → ready → ...`) no vuelven a chequear el pago — si alguien
 cancela el efectivo (`cash/cancel`) después de que ya empezó a prepararse,
 el pedido sigue avanzando igual; marcalo visualmente si eso pasa.
 
-### Cuadre de fin de noche (pantalla de fase 5)
-
-Como delivery + efectivo entra a `preparing` sin estar pagado, en algún
-momento alguien tiene que cerrar esa cuenta con cada repartidor. Es la
-misma API, solo otra combinación de filtros y la misma acción de siempre:
-
-```
-GET /orders?delivery_type=delivery&payment_status=unpaid
-```
-
-Lista los pedidos de delivery todavía sin cobrar (normalmente todos
-`paymentMethod: "cash"` — un QR sin pagar ya está atascado antes de
-`preparing`, no debería llegar hasta acá). Para ver el detalle de uno,
-`GET /orders/:id`. Para marcarlo cobrado cuando el repartidor liquida:
-
-```
-POST /orders/:id/cash/confirm
-```
-
-Es el mismo endpoint que usa el cobro normal — no hay uno separado para
-"cuadre". Es idempotente (llamarlo dos veces no rompe nada) y devuelve el
-pedido actualizado con `paymentStatus: "paid"`. No hay endpoint de "marcar
-varios a la vez" — es uno por uno. Igual que cualquier cobro, exige caja
-abierta (sección 5): si el repartidor liquida sin que nadie haya abierto la
-caja de esa noche, da `409 cash_register_closed`.
-
-⚠️ **No confundir con la caja de la sección 5.** Esto es una consulta ("qué
-falta cobrar"), no una sesión — no tiene apertura/cierre propios. El pedido
-que se cobra acá sí termina contando en el cierre de caja de la sesión que
-esté abierta en ese momento, junto con todo lo demás.
-
-No hay un concepto de "repartidor" en el backend (no hay tabla de motos ni
-se sabe quién entregó cada pedido) — el cuadre es puramente "estos son los
-pedidos delivery+efectivo sin cobrar todavía", el humano hace el
-emparejamiento con quién salió a repartir qué.
+**Delivery**: cocina lo lleva hasta `ready`. De ahí en adelante lo toma un
+repartidor desde su propia pantalla (`docs/delivery-drivers-integration.md`):
+`out_for_delivery` y `delivered` de un pedido de delivery solo los mueve el
+repartidor (o un admin) — `PATCH /orders/:id/status` con rol `kitchen` da
+`403 delivery_flow_only`. El envío que paga el cliente al repartidor se le
+informa pero no se cuadra en el sistema.
 
 `GET /orders/:id` (un solo pedido, no el listado) es para imprimir tickets o
 consultar estado puntual, no para el tablero.

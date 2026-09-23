@@ -26,8 +26,9 @@ export class CashRegisterController {
     return this.cashRegister.close(dto.countedCashAmount, dto.notes, staffUser.username);
   }
 
-  /** Cualquier rol de staff puede consultar si hay caja abierta (ej. para habilitar el cobro en el POS). */
+  /** Cualquier rol de staff excepto delivery puede consultar si hay caja abierta (ej. para habilitar el cobro en el POS). */
   @Get('current')
+  @Roles('admin', 'cashier', 'kitchen')
   getCurrent() {
     return this.cashRegister.getCurrent();
   }

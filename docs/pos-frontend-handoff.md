@@ -106,19 +106,16 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   silencio. `status` inválido devuelve `[]` sin avisar. No hay websockets —
   polling cada 5-10s.
 - **`409 payment_required`** al intentar `confirmed → preparing` si
-  `paymentStatus !== 'paid'` — **excepto** `deliveryType: 'delivery'` +
-  `paymentMethod: 'cash'` (pago contra entrega real: el repartidor cobra al
-  llegar). El POS solo vende `pickup`/`dine_in`, así que esto no te afecta al crear
-  pedidos, pero si el tablero de cocina también muestra pedidos de delivery
-  de WhatsApp vas a ver `preparing` con `paymentStatus: 'unpaid'`
-  legítimamente ahí — no lo marques como error.
-- **Cuadre con las motos** (pantalla de admin/cashier, no del POS de venta):
-  `GET /orders?delivery_type=delivery&payment_status=unpaid` lista los
-  delivery+efectivo todavía sin cobrar. Mismo `POST /orders/:id/cash/confirm`
-  de siempre para marcarlos cobrados — no hay endpoint nuevo, ni "marcar
-  varios a la vez", ni concepto de repartidor en el backend (el emparejamiento
-  con quién salió a repartir es humano). No confundir con la caja (sesión) de
-  abajo — esto es una consulta, no un turno.
+  `paymentStatus !== 'paid'`, sin excepciones: ya no hay pago contra entrega
+  de la comida (se cobra antes de cocina, también en delivery).
+- **Delivery y repartidores**: cocina lleva el pedido hasta `ready`; de ahí lo
+  toma un repartidor con rol `delivery` desde su pantalla (aceptar estando en
+  el local, ver detalle, marcar entregado) — contrato en
+  `docs/delivery-drivers-integration.md`. `out_for_delivery`/`delivered` de un
+  delivery ya no los mueve cocina (`403 delivery_flow_only`), solo el
+  repartidor o un admin. `OrderResponse` trae `deliveryDriverName`,
+  `deliveryAcceptedAt` y `deliveredAt`. El envío que el cliente paga al
+  repartidor solo se informa; no se cuadra en el sistema.
 - **Caja (turno)**: NINGÚN cobro (cash o QR) se puede confirmar sin una caja
   abierta — `POST /cash-register/sessions/open {openingAmount}` es la
   primera pantalla del POS antes de poder vender, y

@@ -117,9 +117,7 @@ export class OrdersController {
   }
 
   // Solo JWT de staff, nunca el token de servicio: es una acción
-  // exclusivamente presencial (el cajero decidiendo con el cliente
-  // adelante), a diferencia de cash/confirm que también usa el agente de
-  // WhatsApp para pago contra entrega.
+  // exclusivamente presencial (el cajero decidiendo con el cliente adelante).
   @Post('orders/:id/split-payment')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('cashier', 'admin')
@@ -130,13 +128,15 @@ export class OrdersController {
   // Solo JWT de staff: el token de servicio del agente de WhatsApp ya no puede
   // marcar cobros en efectivo (un token filtrado daría pedidos por pagados).
   @Post('orders/:id/cash/confirm')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'cashier', 'kitchen')
   confirmCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.confirmCash(id);
   }
 
   @Post('orders/:id/cash/cancel')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'cashier', 'kitchen')
   cancelCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.cancelCash(id);
   }
@@ -149,6 +149,6 @@ export class OrdersController {
     @Body() dto: UpdateOrderStatusDto,
     @CurrentStaffUser() staffUser: JwtPayload,
   ) {
-    return this.orders.updateStatus(id, dto.to, staffUser.username);
+    return this.orders.updateStatus(id, dto.to, staffUser.username, staffUser.role);
   }
 }

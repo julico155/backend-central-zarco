@@ -5,6 +5,7 @@ import { AppConfig } from '../config/configuration';
 import { KYSELY } from '../database/database.module';
 import {
   Database,
+  DashboardUserRole,
   OrderChannel,
   OrderDeliveryType,
   OrderPaymentMethod,
@@ -29,6 +30,7 @@ import { NotificationsOutService } from '../notifications-out/notifications-out.
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 
 export interface OrderItemResponse {
   productId: string;
@@ -72,6 +74,10 @@ export interface OrderResponse {
   splitQrAmount: number | null;
   splitCashConfirmedAt: string | null;
   statusUpdatedBy: string | null;
+  /** Repartidor asignado (solo pedidos de delivery ya aceptados). */
+  deliveryDriverName: string | null;
+  deliveryAcceptedAt: string | null;
+  deliveredAt: string | null;
   createdAt: string;
   items: OrderItemResponse[];
   /** Combos vendidos. `items` solo trae los productos sueltos, así que sin esto el ticket y el tablero de cocina quedan incompletos. */
@@ -1172,6 +1178,7 @@ export class OrdersService {
     orderId: string,
     to: OrderStatus,
     updatedBy: string | null,
+    actorRole: DashboardUserRole,
   ): Promise<OrderResponse> {
     const order = await this.db
       .selectFrom('orders')
@@ -1179,14 +1186,14 @@ export class OrdersService {
       .where('id', '=', orderId)
       .executeTakeFirst();
     if (!order) throw new NotFoundDomainError('order', orderId);
+    assertRoleCanMoveStatus(actorRole, order.delivery_type, to);
 
     const allowed = ORDER_STATUS_TRANSITIONS[order.status] ?? [];
     if (!allowed.includes(to)) {
       throw new InvalidStateTransitionError('order', order.status, to);
     }
 
-    const isCashOnDelivery = order.delivery_type === 'delivery' && order.payment_method === 'cash';
-    if (to === 'preparing' && !isCashOnDelivery && order.payment_status !== 'paid') {
+    if (to === 'preparing' && order.payment_status !== 'paid') {
       throw new DomainException(
         'payment_required',
         HttpStatus.CONFLICT,
@@ -1242,7 +1249,6 @@ export class OrdersService {
       .where('created_at', '<', cutoff)
       .where('cash_confirmed_at', 'is', null)
       .where('split_cash_confirmed_at', 'is', null)
-      .where((eb) => eb.not(eb.and([eb('delivery_type', '=', 'delivery'), eb('payment_method', '=', 'cash')])))
       .where((eb) =>
         eb.not(
           eb.exists(
@@ -1383,6 +1389,9 @@ function toOrderResponse(
     split_qr_amount: string | null;
     split_cash_confirmed_at: Date | string | null;
     status_updated_by: string | null;
+    delivery_driver_name: string | null;
+    delivery_accepted_at: Date | string | null;
+    delivered_at: Date | string | null;
     created_at: Date | string;
   },
   items: {
@@ -1429,6 +1438,11 @@ function toOrderResponse(
       ? new Date(order.split_cash_confirmed_at).toISOString()
       : null,
     statusUpdatedBy: order.status_updated_by,
+    deliveryDriverName: order.delivery_driver_name,
+    deliveryAcceptedAt: order.delivery_accepted_at
+      ? new Date(order.delivery_accepted_at).toISOString()
+      : null,
+    deliveredAt: order.delivered_at ? new Date(order.delivered_at).toISOString() : null,
     createdAt: new Date(order.created_at).toISOString(),
     items: items.map((item) => ({
       productId: item.product_id,

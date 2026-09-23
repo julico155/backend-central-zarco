@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AuthenticatedRequest, ServiceAuthGuard } from './service-auth.guard';
 
@@ -29,7 +29,12 @@ export class ServiceOrStaffAuthGuard implements CanActivate {
     }
 
     await this.jwtAuth.canActivate(context);
-    context.switchToHttp().getRequest<AuthenticatedRequest>().apiClient = STAFF_API_CLIENT;
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest & { staffUser?: { role: string } }>();
+    // El repartidor solo usa /delivery/orders/*: nada de clientes, pedidos ni catálogo con su JWT.
+    if (request.staffUser?.role === 'delivery') {
+      throw new ForbiddenException('El rol delivery no tiene acceso a este recurso.');
+    }
+    request.apiClient = STAFF_API_CLIENT;
     return true;
   }
 }

@@ -19,6 +19,7 @@ import { LateOrderRequestsModule } from './late-order-requests/late-order-reques
 import { AuthModule } from './auth/auth.module';
 import { CashRegisterModule } from './cash-register/cash-register.module';
 import { ReportsModule } from './reports/reports.module';
+import { DeliveryDriversModule } from './delivery-drivers/delivery-drivers.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { ReportsModule } from './reports/reports.module';
     AuthModule,
     CashRegisterModule,
     ReportsModule,
+    DeliveryDriversModule,
   ],
 })
 export class AppModule {}

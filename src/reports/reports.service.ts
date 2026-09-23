@@ -275,6 +275,9 @@ export class ReportsService {
         quoteStatus: order.delivery_quote_status,
         distanceMeters: order.delivery_distance_meters,
         feePaid: order.delivery_fee_paid,
+        driverName: order.delivery_driver_name,
+        acceptedAt: iso(order.delivery_accepted_at),
+        deliveredAt: iso(order.delivered_at),
       },
       timestamps: {
         createdAt: iso(order.created_at),

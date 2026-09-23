@@ -1,0 +1,262 @@
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Kysely } from 'kysely';
+import { KYSELY } from '../database/database.module';
+import { Database, OrderPromotionComponentSnapshot } from '../database/types';
+import { AppConfig } from '../config/configuration';
+import { DomainException, NotFoundDomainError } from '../common/exceptions/domain-exception';
+import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
+import { HaversineDistanceService } from '../delivery/distance/distance.service';
+import { JwtPayload } from '../auth/auth.service';
+import { AcceptDeliveryOrderDto } from './dto/accept-delivery-order.dto';
+import { checkDriverPresence, mapsUrl, presenceException } from './delivery-drivers.rules';
+
+export interface AvailableDeliveryOrder {
+  id: string;
+  orderNumber: string;
+  itemsCount: number;
+  deliveryDistanceMeters: number | null;
+  /** Solo para informar: el envío se le paga al repartidor y no se cuadra en el sistema. */
+  deliveryFeeAmount: number;
+  readySince: string;
+}
+
+export interface MyDeliveryOrder {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  mapsUrl: string | null;
+  notes: string | null;
+  items: { name: string; quantity: number; excludedComplements: string[] }[];
+  promotions: { name: string; comboQuantity: number; components: OrderPromotionComponentSnapshot[] }[];
+  deliveryFeeAmount: number;
+  acceptedAt: string | null;
+}
+
+const iso = (value: Date | string | null): string | null =>
+  value ? new Date(value).toISOString() : null;
+
+/**
+ * Flujo del repartidor: ve los pedidos `ready` de delivery (resumen, sin datos
+ * del cliente), acepta los que va a llevar estando en el local, y al llegar
+ * los marca entregados. Las reglas de negocio (radio, quién puede mover qué)
+ * viven en `delivery-drivers.rules.ts`.
+ */
+@Injectable()
+export class DeliveryDriversService {
+  private readonly distance = new HaversineDistanceService();
+
+  constructor(
+    @Inject(KYSELY) private readonly db: Kysely<Database>,
+    private readonly operationalSettings: OperationalSettingsService,
+    private readonly config: ConfigService<AppConfig, true>,
+  ) {}
+
+  async listAvailable(): Promise<AvailableDeliveryOrder[]> {
+    const orders = await this.db
+      .selectFrom('orders')
+      .select([
+        'id',
+        'order_number',
+        'delivery_distance_meters',
+        'delivery_base_amount',
+        'delivery_surcharge_amount',
+        'updated_at',
+      ])
+      .where('status', '=', 'ready')
+      .where('delivery_type', '=', 'delivery')
+      .where('delivery_driver_id', 'is', null)
+      .orderBy('updated_at', 'asc')
+      .execute();
+    if (orders.length === 0) return [];
+
+    const ids = orders.map((o) => o.id);
+    const [items, promotions] = await Promise.all([
+      this.db
+        .selectFrom('order_items')
+        .select(['order_id', 'quantity'])
+        .where('order_id', 'in', ids)
+        .execute(),
+      this.db
+        .selectFrom('order_promotions')
+        .select(['order_id', 'combo_quantity'])
+        .where('order_id', 'in', ids)
+        .execute(),
+    ]);
+    const counts = new Map<string, number>();
+    for (const i of items) counts.set(i.order_id, (counts.get(i.order_id) ?? 0) + i.quantity);
+    for (const p of promotions) {
+      counts.set(p.order_id, (counts.get(p.order_id) ?? 0) + p.combo_quantity);
+    }
+
+    return orders.map((o) => ({
+      id: o.id,
+      orderNumber: o.order_number,
+      itemsCount: counts.get(o.id) ?? 0,
+      deliveryDistanceMeters: o.delivery_distance_meters,
+      deliveryFeeAmount: Number(o.delivery_base_amount) + Number(o.delivery_surcharge_amount),
+      readySince: new Date(o.updated_at).toISOString(),
+    }));
+  }
+
+  async listMine(driverId: string): Promise<MyDeliveryOrder[]> {
+    const orders = await this.db
+      .selectFrom('orders')
+      .leftJoin('customers', 'customers.id', 'orders.customer_id')
+      .select([
+        'orders.id as id',
+        'orders.order_number as order_number',
+        'orders.customer_name as customer_name',
+        'customers.phone as customer_phone',
+        'orders.delivery_latitude as latitude',
+        'orders.delivery_longitude as longitude',
+        'orders.notes as notes',
+        'orders.delivery_base_amount as base',
+        'orders.delivery_surcharge_amount as surcharge',
+        'orders.delivery_accepted_at as accepted_at',
+      ])
+      .where('orders.delivery_driver_id', '=', driverId)
+      .where('orders.status', '=', 'out_for_delivery')
+      .orderBy('orders.delivery_accepted_at', 'asc')
+      .execute();
+    if (orders.length === 0) return [];
+
+    const ids = orders.map((o) => o.id);
+    const [items, promotions] = await Promise.all([
+      this.db.selectFrom('order_items').selectAll().where('order_id', 'in', ids).execute(),
+      this.db.selectFrom('order_promotions').selectAll().where('order_id', 'in', ids).execute(),
+    ]);
+
+    return orders.map((o) => ({
+      id: o.id,
+      orderNumber: o.order_number,
+      customerName: o.customer_name,
+      customerPhone: o.customer_phone,
+      latitude: o.latitude,
+      longitude: o.longitude,
+      mapsUrl: o.latitude !== null && o.longitude !== null ? mapsUrl(o.latitude, o.longitude) : null,
+      notes: o.notes,
+      items: items
+        .filter((i) => i.order_id === o.id)
+        .map((i) => ({
+          name: i.product_name_snapshot,
+          quantity: i.quantity,
+          excludedComplements: i.excluded_complements,
+        })),
+      promotions: promotions
+        .filter((p) => p.order_id === o.id)
+        .map((p) => ({
+          name: p.promotion_name_snapshot,
+          comboQuantity: p.combo_quantity,
+          components: p.components_snapshot,
+        })),
+      deliveryFeeAmount: Number(o.base) + Number(o.surcharge),
+      acceptedAt: iso(o.accepted_at),
+    }));
+  }
+
+  async accept(
+    orderId: string,
+    driver: JwtPayload,
+    dto: AcceptDeliveryOrderDto,
+  ): Promise<MyDeliveryOrder> {
+    const settings = await this.operationalSettings.getRow();
+    if (settings.restaurant_latitude === null || settings.restaurant_longitude === null) {
+      throw new DomainException(
+        'restaurant_location_not_configured',
+        HttpStatus.CONFLICT,
+        'El local no tiene coordenadas configuradas; un admin tiene que cargarlas en operational-settings.',
+      );
+    }
+
+    const radius = this.config.get('deliveryAcceptRadiusMeters', { infer: true });
+    const { meters } = await this.distance.metersBetween(
+      { latitude: dto.latitude, longitude: dto.longitude },
+      { latitude: settings.restaurant_latitude, longitude: settings.restaurant_longitude },
+    );
+    const presence = checkDriverPresence(meters, dto.accuracyMeters, radius);
+    if (!presence.ok) throw presenceException(presence, meters, radius);
+
+    // CAS: dos repartidores aceptando el mismo pedido a la vez — gana uno solo.
+    const taken = await this.db
+      .updateTable('orders')
+      .set({
+        delivery_driver_id: driver.sub,
+        delivery_driver_name: driver.username,
+        delivery_accepted_at: new Date(),
+        status: 'out_for_delivery',
+        status_updated_by: driver.username,
+        updated_at: new Date(),
+      })
+      .where('id', '=', orderId)
+      .where('status', '=', 'ready')
+      .where('delivery_type', '=', 'delivery')
+      .where('delivery_driver_id', 'is', null)
+      .returning('id')
+      .executeTakeFirst();
+
+    if (!taken) {
+      const existing = await this.db
+        .selectFrom('orders')
+        .select(['status', 'delivery_type', 'delivery_driver_id'])
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      if (!existing) throw new NotFoundDomainError('order', orderId);
+      if (existing.delivery_driver_id) {
+        throw new DomainException(
+          'order_already_taken',
+          HttpStatus.CONFLICT,
+          'Otro repartidor ya aceptó este pedido.',
+        );
+      }
+      throw new DomainException(
+        'order_not_ready',
+        HttpStatus.CONFLICT,
+        'El pedido no es un delivery listo para retirar.',
+        { status: existing.status, deliveryType: existing.delivery_type },
+      );
+    }
+
+    const mine = await this.listMine(driver.sub);
+    const accepted = mine.find((o) => o.id === orderId);
+    if (!accepted) throw new NotFoundDomainError('order', orderId);
+    return accepted;
+  }
+
+  async deliver(orderId: string, driver: JwtPayload): Promise<{ id: string; deliveredAt: string }> {
+    const order = await this.db
+      .selectFrom('orders')
+      .select(['id', 'status', 'delivery_driver_id'])
+      .where('id', '=', orderId)
+      .executeTakeFirst();
+    if (!order) throw new NotFoundDomainError('order', orderId);
+    if (order.delivery_driver_id !== driver.sub && driver.role !== 'admin') {
+      throw new DomainException(
+        'not_your_order',
+        HttpStatus.FORBIDDEN,
+        'Este pedido lo tiene otro repartidor.',
+      );
+    }
+
+    const now = new Date();
+    const delivered = await this.db
+      .updateTable('orders')
+      .set({ status: 'delivered', delivered_at: now, status_updated_by: driver.username, updated_at: now })
+      .where('id', '=', orderId)
+      .where('status', '=', 'out_for_delivery')
+      .returning('id')
+      .executeTakeFirst();
+    if (!delivered) {
+      throw new DomainException(
+        'order_not_out_for_delivery',
+        HttpStatus.CONFLICT,
+        'El pedido no está en reparto.',
+        { status: order.status },
+      );
+    }
+    return { id: orderId, deliveredAt: now.toISOString() };
+  }
+}

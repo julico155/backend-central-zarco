@@ -112,6 +112,11 @@ export interface OrdersTable {
   split_cash_confirmed_at: Timestamp | null;
   confirmed_at: Timestamp | null;
   status_updated_by: string | null;
+  /** Repartidor que aceptó el pedido de delivery (rol `delivery`); null hasta que alguien lo acepta. */
+  delivery_driver_id: string | null;
+  delivery_driver_name: string | null;
+  delivery_accepted_at: Timestamp | null;
+  delivered_at: Timestamp | null;
   /** Caja (turno) donde se confirmó el pago — null hasta que se cobra (o al aceptarse, si fue fuera de horario). */
   register_session_id: string | null;
   created_at: Timestamp;
@@ -368,7 +373,7 @@ export interface OperationalSettingsTable {
   updated_at: Timestamp;
 }
 
-export type DashboardUserRole = 'admin' | 'kitchen' | 'cashier';
+export type DashboardUserRole = 'admin' | 'kitchen' | 'cashier' | 'delivery';
 
 export interface DashboardUsersTable {
   id: Generated<string>;
