@@ -69,6 +69,28 @@ export function assertRoleCanMoveStatus(
   }
 }
 
+/**
+ * Historial de entregas: el repartidor solo ve las suyas (pedir las de otro es
+ * 403); admin y cajero pueden filtrar por un repartidor o, sin filtro, ver
+ * todos (null) para cuadrar a fin de noche.
+ */
+export function resolveHistoryDriverId(
+  actor: { sub: string; role: DashboardUserRole },
+  requestedDriverId: string | undefined,
+): string | null {
+  if (actor.role === 'delivery') {
+    if (requestedDriverId && requestedDriverId !== actor.sub) {
+      throw new DomainException(
+        'not_your_history',
+        HttpStatus.FORBIDDEN,
+        'Solo podés ver tus propias entregas.',
+      );
+    }
+    return actor.sub;
+  }
+  return requestedDriverId ?? null;
+}
+
 export function mapsUrl(latitude: number, longitude: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
 }

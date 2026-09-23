@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database, OrderPromotionComponentSnapshot } from '../database/types';
 import { AppConfig } from '../config/configuration';
@@ -9,7 +9,14 @@ import { OperationalSettingsService } from '../operational-settings/operational-
 import { HaversineDistanceService } from '../delivery/distance/distance.service';
 import { JwtPayload } from '../auth/auth.service';
 import { AcceptDeliveryOrderDto } from './dto/accept-delivery-order.dto';
-import { checkDriverPresence, mapsUrl, presenceException } from './delivery-drivers.rules';
+import { dateInBolivia } from '../common/time/service-window';
+import { resolveDateRange } from '../reports/reports.range';
+import {
+  checkDriverPresence,
+  mapsUrl,
+  presenceException,
+  resolveHistoryDriverId,
+} from './delivery-drivers.rules';
 
 export interface AvailableDeliveryOrder {
   id: string;
@@ -34,6 +41,14 @@ export interface MyDeliveryOrder {
   promotions: { name: string; comboQuantity: number; components: OrderPromotionComponentSnapshot[] }[];
   deliveryFeeAmount: number;
   acceptedAt: string | null;
+}
+
+export interface DeliveryHistoryQuery {
+  from?: string;
+  to?: string;
+  driverId?: string;
+  limit: number;
+  offset: number;
 }
 
 const iso = (value: Date | string | null): string | null =>
@@ -156,6 +171,73 @@ export class DeliveryDriversService {
       deliveryFeeAmount: Number(o.base) + Number(o.surcharge),
       acceptedAt: iso(o.accepted_at),
     }));
+  }
+
+  /**
+   * Entregas ya hechas, filtradas por `delivered_at` (fecha de Bolivia). Sin
+   * `from`/`to` devuelve las de hoy. `totals` cubre el filtro completo, no solo
+   * la página — es lo que se le muestra al repartidor como "cuánto le toca".
+   */
+  async listHistory(actor: JwtPayload, query: DeliveryHistoryQuery) {
+    const driverId = resolveHistoryDriverId(actor, query.driverId);
+    const today = dateInBolivia(new Date());
+    const range =
+      query.from || query.to ? resolveDateRange(query.from, query.to) : resolveDateRange(today, today);
+
+    const base = () =>
+      this.db
+        .selectFrom('orders')
+        .where('status', '=', 'delivered')
+        .where('delivered_at', '>=', range.start)
+        .where('delivered_at', '<', range.end)
+        .$if(driverId !== null, (qb) => qb.where('delivery_driver_id', '=', driverId as string));
+
+    const [totals, rows] = await Promise.all([
+      base()
+        .select([
+          sql<string>`count(*)`.as('deliveries'),
+          sql<string>`coalesce(sum(delivery_base_amount + delivery_surcharge_amount), 0)`.as('fees'),
+        ])
+        .executeTakeFirstOrThrow(),
+      base()
+        .select([
+          'id',
+          'order_number',
+          'customer_name',
+          'delivery_driver_id',
+          'delivery_driver_name',
+          'delivery_accepted_at',
+          'delivered_at',
+          'delivery_distance_meters',
+          'delivery_base_amount',
+          'delivery_surcharge_amount',
+        ])
+        .orderBy('delivered_at', 'desc')
+        .orderBy('id')
+        .limit(query.limit)
+        .offset(query.offset)
+        .execute(),
+    ]);
+
+    return {
+      totals: {
+        deliveries: Number(totals.deliveries),
+        deliveryFeeTotal: Math.round(Number(totals.fees) * 100) / 100,
+      },
+      limit: query.limit,
+      offset: query.offset,
+      orders: rows.map((o) => ({
+        id: o.id,
+        orderNumber: o.order_number,
+        customerName: o.customer_name,
+        driverId: o.delivery_driver_id,
+        driverName: o.delivery_driver_name,
+        acceptedAt: iso(o.delivery_accepted_at),
+        deliveredAt: iso(o.delivered_at),
+        deliveryDistanceMeters: o.delivery_distance_meters,
+        deliveryFeeAmount: Number(o.delivery_base_amount) + Number(o.delivery_surcharge_amount),
+      })),
+    };
   }
 
   async accept(

@@ -68,6 +68,28 @@ Solo el repartidor asignado (o admin). `out_for_delivery → delivered`; devuelv
 `{ id, deliveredAt }`. Errores: `not_your_order` (403),
 `order_not_out_for_delivery` (409).
 
+### `GET /delivery/orders/history`
+Entregas ya hechas, más nuevas primero. Roles `delivery`, `admin` y `cashier`.
+
+| Query | Qué hace |
+|---|---|
+| `from`, `to` | Fechas `YYYY-MM-DD` de Bolivia, inclusivas, sobre `deliveredAt`. **Sin ninguna, devuelve las de hoy.** Máximo 366 días. |
+| `driver_id` | Solo `admin`/`cashier`: filtra por un repartidor; sin él ven todos. Un `delivery` que pida otro id recibe `403 not_your_history`; sin él ve solo las suyas. |
+| `limit`, `offset` | Paginación (default 50, tope 200). |
+
+```json
+{ "totals": { "deliveries": 7, "deliveryFeeTotal": 105 },
+  "limit": 50, "offset": 0,
+  "orders": [{ "id": "...", "orderNumber": "ORD-0123", "customerName": "Ana",
+    "driverId": "...", "driverName": "moto1",
+    "acceptedAt": "2026-09-23T22:10:00.000Z", "deliveredAt": "2026-09-23T22:32:00.000Z",
+    "deliveryDistanceMeters": 2100, "deliveryFeeAmount": 15 }] }
+```
+
+`totals` cubre el filtro completo, no solo la página. Los minutos en ruta salen
+de `deliveredAt - acceptedAt`. `deliveryFeeTotal` es informativo ("cuánto le
+corresponde"): el envío no se cuadra en el sistema.
+
 ## Límites conocidos
 
 - La verificación de presencia usa el GPS que manda el celular: corta el

@@ -4,6 +4,7 @@ import {
   checkDriverPresence,
   mapsUrl,
   presenceException,
+  resolveHistoryDriverId,
 } from './delivery-drivers.rules';
 
 describe('checkDriverPresence', () => {
@@ -43,6 +44,32 @@ describe('assertRoleCanMoveStatus', () => {
     expect(() => assertRoleCanMoveStatus('kitchen', 'pickup', 'delivered')).not.toThrow();
     expect(() => assertRoleCanMoveStatus('kitchen', 'dine_in', 'delivered')).not.toThrow();
     expect(() => assertRoleCanMoveStatus('kitchen', 'delivery', 'ready')).not.toThrow();
+  });
+});
+
+describe('resolveHistoryDriverId', () => {
+  const driver = { sub: 'driver-1', role: 'delivery' as const };
+  const admin = { sub: 'admin-1', role: 'admin' as const };
+  const cashier = { sub: 'cashier-1', role: 'cashier' as const };
+
+  it('el repartidor solo ve lo suyo: sin filtro o con su propio id', () => {
+    expect(resolveHistoryDriverId(driver, undefined)).toBe('driver-1');
+    expect(resolveHistoryDriverId(driver, 'driver-1')).toBe('driver-1');
+  });
+
+  it('el repartidor pidiendo las entregas de otro recibe 403', () => {
+    try {
+      resolveHistoryDriverId(driver, 'driver-2');
+      fail('debía lanzar');
+    } catch (error) {
+      expect((error as DomainException).code).toBe('not_your_history');
+      expect((error as DomainException).getStatus()).toBe(403);
+    }
+  });
+
+  it('admin y cajero pueden filtrar por un repartidor o ver todos (null)', () => {
+    expect(resolveHistoryDriverId(admin, 'driver-2')).toBe('driver-2');
+    expect(resolveHistoryDriverId(cashier, undefined)).toBeNull();
   });
 });
 
