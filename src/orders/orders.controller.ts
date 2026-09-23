@@ -22,8 +22,9 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentStaffUser } from '../auth/current-staff-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
-import { OrderDeliveryType, OrderPaymentStatus, OrderStatus } from '../database/types';
+import { OrderChannel, OrderDeliveryType, OrderPaymentStatus, OrderStatus } from '../database/types';
 import { OrdersService } from './orders.service';
+import { resolveOrderChannel } from './order-channel';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AttachLocationDto } from './dto/attach-location.dto';
 import { KitchenNoteDto } from './dto/kitchen-note.dto';
@@ -52,6 +53,7 @@ export class OrdersController {
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiQuery({ name: 'delivery_type', required: false, type: String })
   @ApiQuery({ name: 'payment_status', required: false, type: String })
+  @ApiQuery({ name: 'channel', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   findMany(
@@ -59,6 +61,7 @@ export class OrdersController {
     @Query('status') status?: OrderStatus,
     @Query('delivery_type') deliveryType?: OrderDeliveryType,
     @Query('payment_status') paymentStatus?: OrderPaymentStatus,
+    @Query('channel') channel?: OrderChannel,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
@@ -67,6 +70,7 @@ export class OrdersController {
       status,
       deliveryType,
       paymentStatus,
+      channel,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -80,6 +84,7 @@ export class OrdersController {
     @ApiClient() apiClient: string,
     @Res({ passthrough: true }) res: Response,
   ) {
+    dto.channel = resolveOrderChannel(apiClient, dto.channel);
     const outcome = await this.orders.create(dto, idempotencyKey, apiClient);
     res.status(outcome.httpStatus);
     return outcome.body;

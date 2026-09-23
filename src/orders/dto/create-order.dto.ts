@@ -24,6 +24,12 @@ export class CreateOrderDto {
   @IsUUID()
   customerId?: string;
 
+  /**
+   * Opcional en el body: el canal real se deriva de la credencial
+   * (`resolveOrderChannel`, en el controller) y, si se manda, tiene que
+   * coincidir. Tras el controller siempre viene seteado.
+   */
+  @IsOptional()
   @IsIn(CHANNELS)
   channel!: OrderChannel;
 

@@ -63,7 +63,7 @@ POST /orders
 Idempotency-Key: <uuid único por intento — SIEMPRE, ver nota abajo>
 {
   "customerId": "<customerId>",
-  "channel": "whatsapp",
+  "channel": "whatsapp",             // opcional: el canal se deriva de tu token (whatsapp-gateway = whatsapp); si lo mandás y no coincide, 400 channel_mismatch
   "customerName": "Juan Pérez",
   "deliveryType": "delivery" | "pickup" | "dine_in",   // pickup = para llevar, dine_in = comer en el local
   "paymentMethod": "qr" | "cash" | "card",

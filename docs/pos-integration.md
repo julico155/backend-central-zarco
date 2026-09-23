@@ -121,7 +121,7 @@ POST /orders
 Idempotency-Key: <uuid nuevo por cada intento de venta>
 {
   "customerId": "<opcional>",
-  "channel": "pos",
+  "channel": "pos",                      // opcional: con JWT de staff el canal siempre es pos; si lo mandás con otro valor, 400 channel_mismatch
   "customerName": "Juan Pérez",           // obligatorio aunque no haya customerId — usá "Cliente mostrador" si no preguntan
   "deliveryType": "pickup",                // "pickup" = para llevar, "dine_in" = mesa; no hay delivery desde el POS
   "paymentMethod": "cash" | "qr",

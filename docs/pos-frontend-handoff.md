@@ -71,7 +71,7 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   reintentos por timeout. **No reordenes `items[]`/`promotions[]` entre
   reintentos** — el hash del body es sensible al orden de los arrays.
   201 = venta nueva, 200 = respuesta cacheada (reimpresión, no recobro).
-- **`bypassHoursGate: true` siempre**, junto con `channel: "pos"`.
+- **`bypassHoursGate: true` siempre**. `channel` es opcional: con JWT de staff el canal es siempre `pos` (lo deriva el backend de la credencial); si lo mandás con otro valor da `400 channel_mismatch`. `GET /orders` acepta `channel=whatsapp|pos` para filtrar por origen.
 - **Tipos de pedido (`deliveryType`)**: `"pickup"` = para llevar desde el
   mostrador, `"dine_in"` = para comer en el local (mesa), `"delivery"` = a
   domicilio (el POS no lo usa hoy). `pickup` y `dine_in` nacen `confirmed`,
