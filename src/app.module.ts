@@ -26,6 +26,7 @@ import { KapsoModule } from './kapso/kapso.module';
 import { SarcoAgentModule } from './sarco-agent/sarco-agent.module';
 import { SarcoMenuModule } from './sarco-menu/sarco-menu.module';
 import { SarcoPaymentProofModule } from './sarco-payment-proof/sarco-payment-proof.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { SarcoPaymentProofModule } from './sarco-payment-proof/sarco-payment-pro
     SarcoAgentModule,
     SarcoMenuModule,
     SarcoPaymentProofModule,
+    HealthModule,
   ],
 })
 export class AppModule {}
