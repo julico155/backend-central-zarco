@@ -15,7 +15,16 @@ async function bootstrap() {
   // el parser default acá, éste igual intercepta el request antes de que
   // corra el de abajo, y el límite chico sigue aplicando.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
-  app.use(json({ limit: '10mb' }));
+  // Kapso firma los bytes exactos. Guardamos una copia no transformada para su
+  // controlador, sin alterar el JSON disponible para los demás endpoints.
+  app.use(
+    json({
+      limit: '10mb',
+      verify: (request, _response, buffer) => {
+        (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   const config = app.get(ConfigService<AppConfig, true>);

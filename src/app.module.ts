@@ -20,6 +20,8 @@ import { AuthModule } from './auth/auth.module';
 import { CashRegisterModule } from './cash-register/cash-register.module';
 import { ReportsModule } from './reports/reports.module';
 import { DeliveryDriversModule } from './delivery-drivers/delivery-drivers.module';
+import { WebhookInboxModule } from './webhook-inbox/webhook-inbox.module';
+import { KapsoModule } from './kapso/kapso.module';
 
 @Module({
   imports: [
@@ -43,6 +45,8 @@ import { DeliveryDriversModule } from './delivery-drivers/delivery-drivers.modul
     CashRegisterModule,
     ReportsModule,
     DeliveryDriversModule,
+    WebhookInboxModule,
+    KapsoModule,
   ],
 })
 export class AppModule {}

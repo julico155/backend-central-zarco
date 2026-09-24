@@ -404,6 +404,27 @@ export interface NotificationJobsTable {
   updated_at: Timestamp;
 }
 
+export type WebhookEventStatus = 'received' | 'processing' | 'processed' | 'failed';
+
+/** Entrega autenticada de Kapso, durable antes de cualquier lógica de negocio. */
+export interface WebhookEventsTable {
+  id: Generated<string>;
+  event_id: string;
+  event_name: string;
+  message_id: string | null;
+  payload: JSONColumnType<Record<string, unknown>>;
+  status: Generated<WebhookEventStatus>;
+  claim_token: string | null;
+  claimed_until: Timestamp | null;
+  attempts: Generated<number>;
+  max_attempts: Generated<number>;
+  next_attempt_at: Timestamp | null;
+  error_message: string | null;
+  processed_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface Database {
   categories: CategoriesTable;
   products: ProductsTable;
@@ -425,4 +446,5 @@ export interface Database {
   operational_settings: OperationalSettingsTable;
   dashboard_users: DashboardUsersTable;
   notification_jobs: NotificationJobsTable;
+  webhook_events: WebhookEventsTable;
 }

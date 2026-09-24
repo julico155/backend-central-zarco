@@ -15,6 +15,14 @@ export interface AppConfig {
     /** Máximo 60 s: debe quedar por debajo del lease de notification_jobs (5 min). */
     timeoutMs: number;
   };
+  kapso: {
+    apiKey: string;
+    webhookSecret: string;
+    phoneNumberId: string;
+    apiBaseUrl: string;
+  };
+  /** ACK durable: persiste y responde antes de ejecutar el dispatcher. */
+  webhookAsyncAck: boolean;
   jwt: {
     secret: string;
     expiresIn: string;
@@ -93,6 +101,13 @@ export default (): AppConfig => ({
       60_000,
     ),
   },
+  kapso: {
+    apiKey: process.env.KAPSO_API_KEY ?? '',
+    webhookSecret: process.env.KAPSO_WEBHOOK_SECRET ?? '',
+    phoneNumberId: process.env.KAPSO_PHONE_NUMBER_ID ?? '',
+    apiBaseUrl: (process.env.KAPSO_API_BASE_URL ?? 'https://api.kapso.ai').replace(/\/+$/, ''),
+  },
+  webhookAsyncAck: process.env.WEBHOOK_ASYNC_ACK === 'true',
   jwt: {
     secret: process.env.JWT_SECRET ?? '',
     expiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
