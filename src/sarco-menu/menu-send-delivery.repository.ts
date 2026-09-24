@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { AGENT_KYSELY } from '../database/agent-database.module';
 import {
   AgentDatabase,
@@ -54,8 +54,11 @@ export class MenuSendDeliveryRepository {
         status: input.status,
         provider_message_id: input.providerMessageId ?? null,
         error_code: input.errorCode ?? null,
-        completed_at: new Date(),
-        updated_at: new Date(),
+        // Reloj de la BASE, no el del proceso: `claimed_at` nace con `now()` de la DB y el CHECK
+        // `completed_at >= claimed_at` rechaza el cierre si el reloj de esta máquina va atrasado.
+        // Un cierre rechazado deja el ledger en `pending` para siempre.
+        completed_at: sql`now()`,
+        updated_at: sql`now()`,
       })
       .where('id', '=', input.id)
       .execute();

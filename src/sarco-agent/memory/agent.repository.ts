@@ -330,7 +330,10 @@ export class AgentRepository implements AgentStore, AgentRunStore {
   async finishRun(input: FinishAgentRunInput): Promise<void> {
     const payload: Record<string, unknown> = {
       status: input.status,
-      completed_at: new Date(input.completedAt),
+      // `greatest(…, started_at)`: `started_at` nace con `now()` de la DB y el CHECK
+      // `completed_at >= started_at` rechazaría un reloj de proceso atrasado (la corrida
+      // quedaría en `processing`). Se conserva el instante del núcleo cuando es válido.
+      completed_at: sql`greatest(${new Date(input.completedAt).toISOString()}::timestamptz, started_at)`,
       response_message_id: input.responseMessageId ?? null,
       error_code: input.errorCode ?? null,
       skipped_at_barrier: input.skippedAtBarrier ?? null,

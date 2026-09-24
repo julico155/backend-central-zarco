@@ -18,6 +18,7 @@ import {
 } from './support/audit';
 import { cleanupFromManifest } from './support/cleanup';
 import { closeReadOnly, openAgent, openCentral, openReadOnly } from './support/connections';
+import { describeClockSkew, measureClockSkew } from './support/clock';
 import { discoverByIdentity } from './support/discover';
 import { inboundLocation, inboundText } from './support/kapso-payloads';
 import { Manifest } from './support/manifest';
@@ -115,6 +116,11 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
     const roCentral = await openReadOnly(options.centralUrl, 'e2e-preflight');
     const roAgent = await openReadOnly(options.agentUrl, 'e2e-preflight');
     try {
+      // Diagnóstico: el reloj de esta máquina frente al de cada base (solo lectura).
+      // eslint-disable-next-line no-console
+      console.log(describeClockSkew('Central', await measureClockSkew(roCentral)));
+      // eslint-disable-next-line no-console
+      console.log(describeClockSkew('Agente', await measureClockSkew(roAgent)));
       ({ realCash } = await runPreflight(roCentral, roAgent, options));
       beforeCentral = await takeSnapshot(roCentral, { realCashSessionId: realCash?.id });
       beforeAgent = await takeSnapshot(roAgent);
@@ -306,7 +312,19 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
       .select('status')
       .where('customer_phone', '=', options.phone)
       .execute();
-    expect(delivery.map((d) => d.status)).toEqual(['sent']);
+    const deliveryStatuses = delivery.map((d) => d.status);
+    if (deliveryStatuses.join(',') !== 'sent') {
+      // El ledger debe quedar en `sent` de forma SÍNCRONA (WEBHOOK_ASYNC_ACK vacío). Si no,
+      // es un bug o un CHECK de la base rechazando el cierre: se muestra la evidencia.
+      const runs = await agent
+        .selectFrom('agent_runs')
+        .select(['status', 'error_code'])
+        .where('agent_conversation_id', '=', conv.id)
+        .execute();
+      throw new Error(
+        `menu_send_deliveries=${JSON.stringify(deliveryStatuses)} (se esperaba ["sent"]); agent_runs=${JSON.stringify(runs)}; llamadas OpenAI=${e2e.externals.callsTo('openai').length}`,
+      );
+    }
 
     await discover();
     noViolations();
