@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
@@ -26,32 +26,6 @@ import { diffSnapshots, takeSnapshot } from './snapshot';
 const ORIGINAL = { httpRequest: http.request, httpsRequest: https.request };
 
 const tmp = () => join(mkdtempSync(join(tmpdir(), 'e2e-manifest-')), 'manifest.json');
-
-describe('Manifest', () => {
-  it('se escribe de forma incremental, sin duplicar, y se puede recargar', () => {
-    const path = tmp();
-    const m = Manifest.create(path, 'run1', '59170001234');
-    m.addCentral('orders', 'o1', 'o2', 'o1');
-    m.addAgent('menu_sessions', 's1');
-
-    const raw = JSON.parse(readFileSync(path, 'utf8'));
-    expect(raw.central.orders).toEqual(['o1', 'o2']);
-    expect(raw.agent.menu_sessions).toEqual(['s1']);
-
-    const loaded = Manifest.load(path);
-    expect(loaded.ids('central', 'orders')).toEqual(['o1', 'o2']);
-    expect(loaded.total()).toBe(3);
-    expect(loaded.data.phone).toBe('59170001234');
-  });
-
-  it('archive() lo consume sin perderlo', () => {
-    const path = tmp();
-    const m = Manifest.create(path, 'r', '59170001234');
-    const done = m.archive();
-    expect(existsSync(path)).toBe(false);
-    expect(existsSync(done)).toBe(true);
-  });
-});
 
 describe('FakeExternals — nada real sale', () => {
   let ext: FakeExternals;

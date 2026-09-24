@@ -57,7 +57,7 @@ export function readE2EOptions(env: NodeJS.ProcessEnv = process.env): E2EOptions
     phone,
     centralUrl,
     agentUrl,
-    manifestPath: env.E2E_MANIFEST_PATH ?? 'e2e-manifest.json',
+    manifestPath: env.E2E_MANIFEST_PATH ?? 'e2e-manifest.jsonl',
     allowOpenRealCashRegister: env.ALLOW_OPEN_REAL_CASH_REGISTER === 'true',
     ignoredApplicationNames: (env.E2E_IGNORED_APPLICATION_NAMES ?? '')
       .split(',')
