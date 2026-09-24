@@ -90,6 +90,26 @@ export interface AppConfig {
     /** Minutos que se pausa el agente tras un takeover humano desde WhatsApp Business App. */
     humanTakeoverPauseMinutes: string;
   };
+  /**
+   * Análisis visual de comprobantes (Fase 2D). Usa la MISMA
+   * `OPENAI_API_KEY` que el agente (`agent.apiKey`), pero un modelo propio:
+   * leer un comprobante es una tarea estructurada distinta de conversar, y
+   * sarcoRestaurant ya la separaba por eso (PAYMENT_PROOF_ANALYSIS_MODEL).
+   */
+  paymentProof: {
+    /** Solo la cadena exacta 'true' enciende el análisis. Vacío/otro valor = capturar sin analizar (analysis_status queda 'pending'). */
+    analysisEnabled: string;
+    /** Vacío = 'gpt-5-mini' (el mismo default que sarcoRestaurant). */
+    analysisModel: string;
+    /** Cuenta(s) donde cobra el negocio, separadas por "|". Sin esto no hay contra qué contrastar y el veredicto nunca puede afirmar un mismatch — ver `expected-account.ts`. */
+    expectedAccountNumbers: string;
+    expectedHolder: string;
+    /** Alias adicionales del titular, separados por "|". */
+    expectedHolderAliases: string;
+    expectedBank: string;
+    /** Alias adicionales del banco (siglas, nombre largo), separados por "|". */
+    expectedBankAliases: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -189,5 +209,14 @@ export default (): AppConfig => ({
     model: process.env.OPENAI_MODEL ?? '',
     visionModel: process.env.AI_VISION_MODEL ?? '',
     humanTakeoverPauseMinutes: process.env.HUMAN_TAKEOVER_PAUSE_MINUTES ?? '',
+  },
+  paymentProof: {
+    analysisEnabled: process.env.PAYMENT_PROOF_ANALYSIS_ENABLED ?? '',
+    analysisModel: process.env.PAYMENT_PROOF_ANALYSIS_MODEL ?? '',
+    expectedAccountNumbers: process.env.PAYMENT_PROOF_EXPECTED_ACCOUNT_NUMBERS ?? '',
+    expectedHolder: process.env.PAYMENT_PROOF_EXPECTED_HOLDER ?? '',
+    expectedHolderAliases: process.env.PAYMENT_PROOF_EXPECTED_HOLDER_ALIASES ?? '',
+    expectedBank: process.env.PAYMENT_PROOF_EXPECTED_BANK ?? '',
+    expectedBankAliases: process.env.PAYMENT_PROOF_EXPECTED_BANK_ALIASES ?? '',
   },
 });

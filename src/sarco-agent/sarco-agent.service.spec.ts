@@ -17,6 +17,11 @@ function fakeConfig(agent: Partial<Record<string, string>> = {}) {
   return { get: (key: string) => values[key] } as never;
 }
 
+/** Por defecto ninguna imagen se captura como comprobante: preserva el comportamiento de 2B/2C tal cual. */
+function fakePaymentProofCapture(outcome: 'not_a_proof' | 'captured' | 'skipped' = 'not_a_proof') {
+  return { tryCapture: jest.fn().mockResolvedValue(outcome) };
+}
+
 function fakeRepository() {
   const conversations = new Map<string, { id: string; state: 'active' | 'paused' }>();
   const insertMessage = jest.fn().mockResolvedValue('inserted');
@@ -95,6 +100,7 @@ describe('SarcoAgentService.handleInboundBatch', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakePaymentProofCapture() as never,
     );
 
     await service.handleInboundBatch([
@@ -114,6 +120,7 @@ describe('SarcoAgentService.handleInboundBatch', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakePaymentProofCapture() as never,
     );
 
     await service.handleInboundBatch([baseEvent({ contentType: 'location', text: null })]);
@@ -134,6 +141,7 @@ describe('SarcoAgentService.handleInboundBatch', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakePaymentProofCapture() as never,
     );
 
     await service.handleInboundBatch([baseEvent({ contentType: 'text', text: 'hola' })]);
@@ -154,6 +162,7 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakePaymentProofCapture() as never,
     );
 
     const payload = {
@@ -179,6 +188,7 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakePaymentProofCapture() as never,
     );
 
     const payload = {
@@ -200,6 +210,7 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakePaymentProofCapture() as never,
     );
 
     for (const eventName of [
@@ -247,6 +258,7 @@ describe('SarcoAgentService — send_menu queda conectado de verdad (Fase 2C)', 
       {} as never,
       { listForModel: jest.fn().mockResolvedValue([]) } as never,
       menuDispatch as never,
+      fakePaymentProofCapture() as never,
     );
 
     await service.handleInboundBatch([
@@ -256,5 +268,91 @@ describe('SarcoAgentService — send_menu queda conectado de verdad (Fase 2C)', 
     expect(menuDispatch.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ customerPhone: '59170000000', sourceMessageId: 'wamid.1' }),
     );
+  });
+});
+
+describe('SarcoAgentService.handleInboundBatch — imagen vs. comprobante (Fase 2D)', () => {
+  it('una imagen capturada como comprobante NUNCA se persiste en agent_messages ni dispara un turno', async () => {
+    const repository = fakeRepository();
+    const paymentProofCapture = fakePaymentProofCapture('captured');
+    const service = new SarcoAgentService(
+      fakeConfig(),
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      paymentProofCapture as never,
+    );
+
+    await service.handleInboundBatch([
+      baseEvent({ messageId: 'wamid.proof.1', contentType: 'image', text: null }),
+    ]);
+
+    expect(paymentProofCapture.tryCapture).toHaveBeenCalledTimes(1);
+    expect(repository.insertMessage).not.toHaveBeenCalled();
+    expect(repository.claimRun).not.toHaveBeenCalled();
+  });
+
+  it('una imagen normal (not_a_proof, sin pedido QR esperando) sigue el camino de siempre: se persiste e intenta un turno', async () => {
+    const repository = fakeRepository();
+    repository.conversations.set('59170000000', { id: 'conv-1', state: 'active' });
+    const paymentProofCapture = fakePaymentProofCapture('not_a_proof');
+    const service = new SarcoAgentService(
+      fakeConfig(),
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      paymentProofCapture as never,
+    );
+
+    await service.handleInboundBatch([
+      baseEvent({
+        messageId: 'wamid.normal.1',
+        customerPhone: '59170000000',
+        contentType: 'image',
+        text: null,
+        image: {
+          id: 'media-1',
+          url: 'https://app.kapso.ai/media/a',
+          mimeType: 'image/jpeg',
+          caption: null,
+        },
+      }),
+    ]);
+
+    expect(paymentProofCapture.tryCapture).toHaveBeenCalledTimes(1);
+    expect(repository.insertMessage).toHaveBeenCalledTimes(1);
+    // resolveExpiredPause (dentro de runTurn) confirma que sí se intentó un turno.
+    expect(repository.findPauseStateByPhone).toHaveBeenCalledWith('59170000000');
+  });
+
+  it('un mensaje de texto normal ni siquiera pasa por la captura de comprobantes de forma distinta: se ofrece igual, y el servicio la descarta', async () => {
+    const repository = fakeRepository();
+    const paymentProofCapture = fakePaymentProofCapture('not_a_proof');
+    const service = new SarcoAgentService(
+      fakeConfig(),
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      paymentProofCapture as never,
+    );
+
+    await service.handleInboundBatch([
+      baseEvent({ messageId: 'wamid.text.1', contentType: 'text', text: 'hola' }),
+    ]);
+
+    // El servicio de captura decide por su cuenta que un mensaje de texto no
+    // es candidato (ver PaymentProofCaptureService.spec.ts) — aquí solo se
+    // confirma que SarcoAgentService se lo ofrece a TODOS los eventos, sin
+    // filtrar por tipo de antemano.
+    expect(paymentProofCapture.tryCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ contentType: 'text' }),
+    );
+    expect(repository.insertMessage).toHaveBeenCalledTimes(1);
   });
 });

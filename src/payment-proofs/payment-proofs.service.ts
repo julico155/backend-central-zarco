@@ -2,7 +2,13 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
-import { Database, PaymentProofMatchMethod, PaymentProofRoutingException } from '../database/types';
+import {
+  Database,
+  PaymentProofAnalysisFacts,
+  PaymentProofAnalysisVerdict,
+  PaymentProofMatchMethod,
+  PaymentProofRoutingException,
+} from '../database/types';
 import {
   DomainException,
   NotFoundDomainError,
@@ -409,6 +415,67 @@ export class PaymentProofsService {
     }
     const bytes = await this.storage.getObject(row.storage_key);
     return { bytes, mimeType: row.mime_type };
+  }
+
+  /**
+   * Cierra el análisis visual (Fase 2D) con un veredicto. Único punto de
+   * escritura de las columnas `analysis_*` — igual que `routeAndClaim` es el
+   * único punto de escritura de la asociación. `analysis_status='ok'` exige
+   * `analyzed_at` y `analysis_verdict` en la MISMA sentencia (CHECK
+   * `payment_proofs_analysis_coherence`, migración 1700000034000).
+   */
+  async recordAnalysis(
+    id: string,
+    input: {
+      verdict: PaymentProofAnalysisVerdict;
+      reasons: string[];
+      amountLabel: string | null;
+      facts: PaymentProofAnalysisFacts;
+      model: string;
+    },
+  ): Promise<PaymentProofResponse> {
+    const row = await this.db
+      .updateTable('payment_proofs')
+      .set({
+        analysis_status: 'ok',
+        analysis_verdict: input.verdict,
+        analysis_reasons: input.reasons,
+        analysis_amount_label: input.amountLabel,
+        analysis_facts: input.facts as never,
+        analysis_model: input.model,
+        analyzed_at: new Date(),
+        updated_at: new Date(),
+      })
+      .where('id', '=', id)
+      .returningAll()
+      .executeTakeFirst();
+    if (!row) throw new NotFoundDomainError('payment_proof', id);
+    return toResponse(row);
+  }
+
+  /**
+   * `analysis_status='failed'` — significa "no se pudo leer", nunca "se leyó
+   * y no cuadra". El CHECK de coherencia exige que NO lleve veredicto ni
+   * `analyzed_at`: un intento fallido no afirma nada sobre el comprobante.
+   */
+  async markAnalysisFailed(id: string): Promise<void> {
+    await this.db
+      .updateTable('payment_proofs')
+      .set({ analysis_status: 'failed', updated_at: new Date() })
+      .where('id', '=', id)
+      .execute();
+  }
+
+  /** Referencias de transacción ya usadas por OTRO comprobante — para `referenceReused`. */
+  async findByTransactionRef(transactionRef: string, excludeId: string): Promise<boolean> {
+    const row = await this.db
+      .selectFrom('payment_proofs')
+      .select('id')
+      .where(sql<boolean>`analysis_facts ->> 'transactionRef' = ${transactionRef}`)
+      .where('id', '!=', excludeId)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
   }
 }
 

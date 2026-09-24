@@ -30,11 +30,12 @@ import { isExplicitMenuRequest } from './business/menu-request';
 import { DON_ZARCO_MAX_OUTPUT_TOKENS, systemPromptForMode } from './business/prompt';
 import { isPaymentMethodAllowed } from '../orders/order-channel';
 import { MenuDispatchService } from '../sarco-menu/menu-dispatch.service';
+import { PaymentProofCaptureService } from '../sarco-payment-proof/payment-proof-capture.service';
 
 const logger = new Logger('SarcoAgentService');
 
 /**
- * Cableado real del Agent Core dentro de Backend Central (Fases 2B y 2C).
+ * Cableado real del Agent Core dentro de Backend Central (Fases 2B, 2C, 2D).
  * Equivalente de `createAgentChannel()` en sarcoRestaurant
  * (src/lib/agent/service.ts), pero como servicio Nest inyectable: reúne el
  * store (Kysely), el modelo (OpenAI), el envío (Kapso) y el catálogo de
@@ -63,6 +64,7 @@ export class SarcoAgentService {
     private readonly mediaResolver: KapsoAgentMediaResolver,
     private readonly menuCatalog: MenuCatalogAdapter,
     private readonly menuDispatch: MenuDispatchService,
+    private readonly paymentProofCapture: PaymentProofCaptureService,
   ) {}
 
   private readAgentEnv() {
@@ -168,17 +170,36 @@ export class SarcoAgentService {
   }
 
   /**
-   * `whatsapp.message.received`, ya normalizado y posiblemente en lote. Se
-   * persiste el historial COMPLETO (todos los tipos de contenido, elegibles
-   * o no) y solo se dispara un turno del agente por cada mensaje elegible
-   * (texto o imagen con contenido) — igual que sarcoRestaurant.
+   * `whatsapp.message.received`, ya normalizado y posiblemente en lote.
    *
-   * Lo que NO se procesa todavía (ubicación, comprobante, interactive) queda
-   * PERSISTIDO en el historial pero sin ninguna reacción de negocio: es la
-   * frontera explícita que pide esta fase, no un traspaso silencioso.
+   * Fase 2D: CADA imagen del lote se le ofrece primero a
+   * `PaymentProofCaptureService`. Si hay un pedido QR esperando pago de este
+   * cliente, la imagen se captura como comprobante — igual que la puerta
+   * `isProofBearing` de sarcoRestaurant — y NUNCA llega a persistirse en
+   * `agent_messages` ni a Vision del agente: es una frontera de datos
+   * aparte, no una del historial conversacional. Solo lo que NO se capturó
+   * (imagen normal, o sin pedido que asociar) sigue el camino de 2B/2C.
+   *
+   * Del resto se persiste el historial COMPLETO (todos los tipos de
+   * contenido, elegibles o no) y solo se dispara un turno del agente por
+   * cada mensaje elegible (texto o imagen con contenido).
+   *
+   * Lo que NO se procesa todavía (ubicación, interactive) queda PERSISTIDO
+   * en el historial pero sin ninguna reacción de negocio: es la frontera
+   * explícita que pide esta fase, no un traspaso silencioso.
    */
   async handleInboundBatch(events: readonly NormalizedKapsoEvent[]): Promise<void> {
-    const burst = events.map(toAgentInboundMessage);
+    const eligibleEvents: NormalizedKapsoEvent[] = [];
+    for (const event of events) {
+      const capture = await this.paymentProofCapture.tryCapture(event);
+      if (capture === 'captured') {
+        logger.log(`agent_inbound_payment_proof messageId=${event.messageId ?? 'null'}`);
+        continue;
+      }
+      eligibleEvents.push(event);
+    }
+
+    const burst = eligibleEvents.map(toAgentInboundMessage);
 
     for (const message of burst) {
       const persisted = await persistCustomerInbound(message, this.repository);

@@ -281,6 +281,20 @@ export type PaymentProofCaptureStatus = 'capturing' | 'stored' | 'failed';
 export type PaymentProofAnalysisStatus = 'pending' | 'ok' | 'failed';
 export type PaymentProofAnalysisVerdict = 'ok' | 'suspicious' | 'unreadable';
 
+/** Hechos leídos de la imagen por la visión (Fase 2D) — ver `sarco-payment-proof/proof-vision.ts`. */
+export interface PaymentProofAnalysisFacts {
+  looksLikeReceipt: boolean;
+  legible: boolean;
+  bank: string | null;
+  destinationBank: string | null;
+  destinationAccount: string | null;
+  destinationHolder: string | null;
+  amount: number | null;
+  currency: string | null;
+  transactionRef: string | null;
+  paidAtLocal: string | null;
+}
+
 export interface PaymentProofsTable {
   id: Generated<string>;
   order_id: string | null;
@@ -301,6 +315,10 @@ export interface PaymentProofsTable {
   analysis_verdict: PaymentProofAnalysisVerdict | null;
   analysis_reasons: string[] | null;
   analysis_amount_label: string | null;
+  /** Fase 2D: hechos leídos (banco/cuenta/titular/monto/referencia/fecha), nunca cuando `analysis_status='failed'`. */
+  analysis_facts: JSONColumnType<PaymentProofAnalysisFacts> | null;
+  analyzed_at: Timestamp | null;
+  analysis_model: string | null;
   candidate_count: number | null;
   created_at: Timestamp;
   updated_at: Timestamp;

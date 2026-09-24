@@ -24,6 +24,7 @@ import { WebhookInboxModule } from './webhook-inbox/webhook-inbox.module';
 import { KapsoModule } from './kapso/kapso.module';
 import { SarcoAgentModule } from './sarco-agent/sarco-agent.module';
 import { SarcoMenuModule } from './sarco-menu/sarco-menu.module';
+import { SarcoPaymentProofModule } from './sarco-payment-proof/sarco-payment-proof.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { SarcoMenuModule } from './sarco-menu/sarco-menu.module';
     KapsoModule,
     SarcoAgentModule,
     SarcoMenuModule,
+    SarcoPaymentProofModule,
   ],
 })
 export class AppModule {}
