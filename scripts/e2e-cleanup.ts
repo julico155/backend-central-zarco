@@ -6,7 +6,7 @@
  *     $env:ALLOW_REAL_DB_E2E='true'; npm run e2e:cleanup
  *     $env:ALLOW_REAL_DB_E2E='true'; npm run e2e:cleanup -- --dry-run
  *
- * Variables: DATABASE_URL, AGENT_DATABASE_URL, E2E_MANIFEST_PATH (default e2e-manifest.json).
+ * Variables: DATABASE_URL, AGENT_DATABASE_URL, E2E_MANIFEST_PATH (default e2e-manifest.jsonl).
  * Nunca imprime URLs, hosts ni datos de negocio: solo conteos.
  */
 import { cleanupFromManifest } from '../test/real-db-e2e/support/cleanup';
@@ -30,13 +30,17 @@ async function main(): Promise<void> {
     throw new Error('DATABASE_URL y AGENT_DATABASE_URL deben estar definidas y ser distintas.');
   }
   const dryRun = process.argv.includes('--dry-run');
-  const manifestPath = process.env.E2E_MANIFEST_PATH ?? 'e2e-manifest.json';
+  const manifestPath = process.env.E2E_MANIFEST_PATH ?? 'e2e-manifest.jsonl';
   const ignored = (process.env.E2E_IGNORED_APPLICATION_NAMES ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
 
   const manifest = Manifest.load(manifestPath);
+  if (manifest.data.archived) {
+    console.log('Ese manifest ya fue consumido por un cleanup anterior: no hay nada que borrar.');
+    return;
+  }
   console.log(`Manifest: run ${manifest.data.runId}, ${manifest.total()} ids registrados.`);
 
   const roC = await openReadOnly(centralUrl, 'e2e-cleanup-check');
@@ -62,7 +66,7 @@ async function main(): Promise<void> {
     }
     const report = await cleanupFromManifest(central, agent, manifest);
     console.log('Filas borradas:', JSON.stringify(report.deleted));
-    console.log(`Manifest archivado en ${manifest.archive()}`);
+    console.log(`Manifest marcado como consumido: ${manifest.archive()}`);
   } finally {
     await central.destroy();
     await agent.destroy();
