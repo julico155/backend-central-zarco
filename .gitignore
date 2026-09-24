@@ -16,3 +16,9 @@ postman/baneco-certificacion/
 # Reporte de introspección de la DB Agente (metadatos; no se versiona)
 agent-schema-report*.txt
 central-schema-report*.txt
+
+# E2E contra DB reales: manifest local de ids creados
+e2e-manifest.json*
+
+# E2E contra DB reales: manifest local de ids creados
+e2e-manifest.json*

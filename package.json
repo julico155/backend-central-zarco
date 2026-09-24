@@ -15,6 +15,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "e2e:real-db": "jest --config ./test/real-db-e2e/jest.config.json --runInBand",
+    "e2e:cleanup": "ts-node scripts/e2e-cleanup.ts",
     "migrate": "node-pg-migrate --migration-file-language sql -m migrations",
     "migrate:up": "node-pg-migrate up --migration-file-language sql -m migrations",
     "migrate:down": "node-pg-migrate down --migration-file-language sql -m migrations",
@@ -83,6 +85,10 @@
       "ts"
     ],
     "rootDir": "src",
+    "roots": [
+      "<rootDir>",
+      "<rootDir>/../test/real-db-e2e"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
