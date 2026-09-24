@@ -216,12 +216,12 @@ simulado:
   `GET /delivery/orders/available|mine`, `POST /delivery/orders/:id/accept`
   (solo estando a menos de `DELIVERY_ACCEPT_RADIUS_METERS` del local, con CAS
   contra dos repartidores a la vez) y `POST .../deliver`. Cocina ya no mueve
-  un delivery a `out_for_delivery`/`delivered`. `available` nunca manda la
-  lat/lng del cliente (esa sigue oculta hasta aceptar) pero sí
-  `nearbyOrders[]` — distancia entre pedidos disponibles entre sí, a menos de
-  `DELIVERY_NEARBY_RADIUS_METERS`, para que el repartidor detecte dos que le
-  convenga llevarse en un solo viaje. Detalle en
-  `docs/delivery-drivers-integration.md`.
+  un delivery a `out_for_delivery`/`delivered`. `available` manda
+  `latitude`/`longitude`/`mapsUrl` de cada pedido (nombre/teléfono del
+  cliente siguen ocultos hasta aceptar) más `nearbyOrders[]` — distancia
+  entre pedidos disponibles entre sí, a menos de
+  `DELIVERY_NEARBY_RADIUS_METERS`, para no obligar a comparar pines a ojo.
+  Detalle en `docs/delivery-drivers-integration.md`.
 - **`reports`** — reportería y KPIs, solo lectura y solo `admin`
   (`GET /reports/kpis|sales/timeseries|sales/orders|sales/orders/:id|
   products/top|cash-sessions`). "Vendido" = pagado y no cancelado, fechas en

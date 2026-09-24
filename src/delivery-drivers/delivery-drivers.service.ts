@@ -28,11 +28,16 @@ export interface AvailableDeliveryOrder {
   deliveryFeeAmount: number;
   readySince: string;
   /**
-   * Otros pedidos disponibles a menos de `deliveryNearbyRadiusMeters` de
-   * ESTE — nunca la ubicación cruda del cliente (esa sigue oculta hasta
-   * aceptar, ver `MyDeliveryOrder`). Sirve para detectar dos pedidos que
-   * conviene llevarse en un solo viaje.
+   * Ubicación de entrega, visible ya en "disponibles" (decisión del dueño del
+   * negocio: quiere que el repartidor la vea a ojo en el mapa antes de
+   * aceptar, para agrupar viajes) — null si el pedido todavía no tiene
+   * cotización de distancia. El nombre/teléfono del cliente SÍ sigue oculto
+   * hasta aceptar (`MyDeliveryOrder`).
    */
+  latitude: number | null;
+  longitude: number | null;
+  mapsUrl: string | null;
+  /** Otros pedidos disponibles a menos de `deliveryNearbyRadiusMeters` de ESTE — atajo para no tener que comparar pines a ojo. */
   nearbyOrders: { id: string; orderNumber: string; distanceMeters: number }[];
 }
 
@@ -63,10 +68,11 @@ const iso = (value: Date | string | null): string | null =>
   value ? new Date(value).toISOString() : null;
 
 /**
- * Flujo del repartidor: ve los pedidos `ready` de delivery (resumen, sin datos
- * del cliente), acepta los que va a llevar estando en el local, y al llegar
- * los marca entregados. Las reglas de negocio (radio, quién puede mover qué)
- * viven en `delivery-drivers.rules.ts`.
+ * Flujo del repartidor: ve los pedidos `ready` de delivery (con ubicación,
+ * para poder agrupar viajes a ojo en el mapa — pero SIN nombre/teléfono del
+ * cliente todavía), acepta los que va a llevar estando en el local, y al
+ * llegar los marca entregados. Las reglas de negocio (radio, quién puede
+ * mover qué) viven en `delivery-drivers.rules.ts`.
  */
 @Injectable()
 export class DeliveryDriversService {
@@ -140,6 +146,12 @@ export class DeliveryDriversService {
       deliveryDistanceMeters: o.delivery_distance_meters,
       deliveryFeeAmount: Number(o.delivery_base_amount) + Number(o.delivery_surcharge_amount),
       readySince: new Date(o.updated_at).toISOString(),
+      latitude: o.delivery_latitude,
+      longitude: o.delivery_longitude,
+      mapsUrl:
+        o.delivery_latitude !== null && o.delivery_longitude !== null
+          ? mapsUrl(o.delivery_latitude, o.delivery_longitude)
+          : null,
       nearbyOrders: nearby.get(o.id) ?? [],
     }));
   }

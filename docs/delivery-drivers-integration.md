@@ -27,28 +27,30 @@ o un admin. Pickup y mesa no cambian.
 ## Endpoints
 
 ### `GET /delivery/orders/available`
-Pedidos `ready`, de delivery y sin repartidor, más viejos primero. **Solo
-resumen**, sin datos del cliente hasta aceptar:
+Pedidos `ready`, de delivery y sin repartidor, más viejos primero. Trae
+ubicación (para que el repartidor la vea en el mapa y agrupe viajes a ojo)
+pero **todavía sin nombre ni teléfono del cliente** — eso sigue oculto hasta
+aceptar:
 
 ```json
 [{ "id": "...", "orderNumber": "ORD-0123", "itemsCount": 3,
    "deliveryDistanceMeters": 2100, "deliveryFeeAmount": 15,
    "readySince": "2026-09-23T18:04:00.000Z",
+   "latitude": -17.39, "longitude": -66.16,
+   "mapsUrl": "https://www.google.com/maps/search/?api=1&query=-17.39,-66.16",
    "nearbyOrders": [{ "id": "...", "orderNumber": "ORD-0124", "distanceMeters": 180 }] }]
 ```
 
 `deliveryFeeAmount` es solo informativo: el envío se le paga al repartidor y no
 se cuadra en el sistema (la comida siempre se cobra antes, por QR).
 
-`nearbyOrders`: otros pedidos disponibles a menos de
-`DELIVERY_NEARBY_RADIUS_METERS` (default 500 m) de este — para que el
-repartidor detecte dos pedidos que le convenga llevarse en un solo viaje.
-**Nunca es la ubicación del cliente**: solo la distancia entre pedidos entre
-sí. La lat/lng real de cada pedido sigue oculta hasta aceptarlo (ahí sí,
-`mine` trae `latitude`/`longitude`/`mapsUrl`) — mostrale al repartidor algo
-como "a 180m de ORD-0124" o un link "¿Llevar los dos?", nunca coordenadas.
-Un pedido sin cotización de distancia todavía (`deliveryQuoteStatus` distinto
-de `quoted`) puede no tener con qué agruparse y trae `nearbyOrders: []`.
+`latitude`/`longitude`/`mapsUrl` son `null` si el pedido todavía no tiene
+cotización de distancia (`deliveryQuoteStatus` distinto de `quoted`).
+
+`nearbyOrders`: atajo calculado en el backend con la distancia a otros
+pedidos disponibles a menos de `DELIVERY_NEARBY_RADIUS_METERS` (default
+500 m) de este — para no obligar al repartidor a comparar pines a ojo cada
+vez. Un pedido sin cotización todavía trae `nearbyOrders: []`.
 
 ### `POST /delivery/orders/:id/accept`
 ```json
