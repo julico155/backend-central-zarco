@@ -1,4 +1,5 @@
 import { SarcoAgentService } from './sarco-agent.service';
+import { LocationAttachRetryError } from '../orders/location-attach.service';
 import type { NormalizedKapsoEvent } from '../kapso/kapso.types';
 
 function fakeConfig(agent: Partial<Record<string, string>> = {}) {
@@ -354,5 +355,88 @@ describe('SarcoAgentService.handleInboundBatch — imagen vs. comprobante (Fase 
       expect.objectContaining({ contentType: 'text' }),
     );
     expect(repository.insertMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SarcoAgentService.handleInboundBatch — ubicación de WhatsApp', () => {
+  const pin = {
+    latitude: -17.78,
+    longitude: -63.18,
+    name: null,
+    address: null,
+    contextMessageId: null,
+  };
+
+  function serviceWithLocation(tryAttach: jest.Mock) {
+    const repository = fakeRepository();
+    const service = new SarcoAgentService(
+      fakeConfig(),
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      fakePaymentProofCapture() as never,
+      undefined,
+      { tryAttach } as never,
+    );
+    return { repository, service };
+  }
+
+  it('un pin se adjunta al pedido del teléfono, se persiste en el historial y NO dispara turno del agente', async () => {
+    const tryAttach = jest
+      .fn()
+      .mockResolvedValue({ result: 'attached', orderId: 'o1', quoted: true });
+    const { repository, service } = serviceWithLocation(tryAttach);
+
+    await service.handleInboundBatch([
+      baseEvent({ contentType: 'location', text: null, location: pin }),
+    ]);
+
+    expect(tryAttach).toHaveBeenCalledTimes(1);
+    expect(tryAttach).toHaveBeenCalledWith({
+      customerPhone: '59170000000',
+      latitude: -17.78,
+      longitude: -63.18,
+    });
+    expect(repository.insertMessage).toHaveBeenCalledTimes(1);
+    expect(repository.findPauseStateByPhone).not.toHaveBeenCalled();
+  });
+
+  it.each(['already_attached', 'location_conflict', 'no_order'])(
+    'resultado %s: igual se persiste y no hay turno (no es un error)',
+    async (result) => {
+      const tryAttach = jest.fn().mockResolvedValue({ result, orderId: 'o1', quoted: false });
+      const { repository, service } = serviceWithLocation(tryAttach);
+
+      await expect(
+        service.handleInboundBatch([
+          baseEvent({ contentType: 'location', text: null, location: pin }),
+        ]),
+      ).resolves.toBeUndefined();
+
+      expect(repository.insertMessage).toHaveBeenCalledTimes(1);
+      expect(repository.findPauseStateByPhone).not.toHaveBeenCalled();
+    },
+  );
+
+  it('un error reintentable se propaga: el evento del inbox queda failed y se reintenta', async () => {
+    const tryAttach = jest.fn().mockRejectedValue(new LocationAttachRetryError());
+    const { service } = serviceWithLocation(tryAttach);
+
+    await expect(
+      service.handleInboundBatch([
+        baseEvent({ contentType: 'location', text: null, location: pin }),
+      ]),
+    ).rejects.toBeInstanceOf(LocationAttachRetryError);
+  });
+
+  it('un mensaje de texto no toca el servicio de ubicación', async () => {
+    const tryAttach = jest.fn();
+    const { service } = serviceWithLocation(tryAttach);
+
+    await service.handleInboundBatch([baseEvent({ contentType: 'text', text: 'hola' })]);
+
+    expect(tryAttach).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,7 @@ import { createRequestHumanAction } from './tools/request-human';
 import type { AgentTool } from './tools/registry';
 import { createHandoffPort, createSilenceAfterSpokenHandoff } from './handoff/handoff.service';
 import { HandoffNoticeService } from './handoff/handoff-notice.service';
+import { LocationAttachService } from '../orders/location-attach.service';
 import { isExplicitMenuRequest } from './business/menu-request';
 import { DON_ZARCO_MAX_OUTPUT_TOKENS, systemPromptForMode } from './business/prompt';
 import { isPaymentMethodAllowed } from '../orders/order-channel';
@@ -67,6 +68,7 @@ export class SarcoAgentService {
     private readonly menuDispatch: MenuDispatchService,
     private readonly paymentProofCapture: PaymentProofCaptureService,
     private readonly handoffNotice?: HandoffNoticeService,
+    private readonly locationAttach?: LocationAttachService,
   ) {}
 
   private readAgentEnv() {
@@ -189,13 +191,26 @@ export class SarcoAgentService {
    * contenido, elegibles o no) y solo se dispara un turno del agente por
    * cada mensaje elegible (texto o imagen con contenido).
    *
-   * Lo que NO se procesa todavía (ubicación, interactive) queda PERSISTIDO
-   * en el historial pero sin ninguna reacción de negocio: es la frontera
-   * explícita que pide esta fase, no un traspaso silencioso.
+   * Lo que NO dispara turno (ubicación, interactive) queda PERSISTIDO en el
+   * historial. La ubicación además se adjunta al pedido de delivery que la
+   * esperaba (`LocationAttachService`); interactive sigue sin reacción de
+   * negocio, no es un traspaso silencioso.
    */
   async handleInboundBatch(events: readonly NormalizedKapsoEvent[]): Promise<void> {
     const eligibleEvents: NormalizedKapsoEvent[] = [];
     for (const event of events) {
+      // Un pin de ubicación se adjunta al pedido de delivery que lo esperaba. El
+      // mensaje sigue su camino normal (se persiste, sin turno del agente). Un
+      // error reintentable (o de cotización) se propaga: el evento del inbox
+      // queda `failed` y se reintenta — adjuntar es idempotente.
+      if (event.contentType === 'location' && event.location && this.locationAttach) {
+        const attached = await this.locationAttach.tryAttach({
+          customerPhone: event.customerPhone,
+          latitude: event.location.latitude,
+          longitude: event.location.longitude,
+        });
+        logger.log(`agent_inbound_location result=${attached.result}`);
+      }
       const capture = await this.paymentProofCapture.tryCapture(event);
       if (capture === 'captured') {
         logger.log(`agent_inbound_payment_proof messageId=${event.messageId ?? 'null'}`);

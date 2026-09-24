@@ -8,6 +8,7 @@ import { MenuSendDeliveryRepository } from '../sarco-menu/menu-send-delivery.rep
 import { MenuOrderService } from '../sarco-menu/menu-order.service';
 import { WebhookInboxService } from '../webhook-inbox/webhook-inbox.service';
 import { OrdersService } from '../orders/orders.service';
+import { LocationAttachService } from '../orders/location-attach.service';
 import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
 import { CategoriesService } from '../categories/categories.service';
@@ -43,6 +44,7 @@ describe('cada servicio usa SU base de datos', () => {
 
   it.each<[string, new (...args: never[]) => unknown]>([
     ['OrdersService', OrdersService],
+    ['LocationAttachService', LocationAttachService],
     ['CustomersService', CustomersService],
     ['ProductsService', ProductsService],
     ['CategoriesService', CategoriesService],

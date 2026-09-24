@@ -9,6 +9,7 @@ import { BankQrModule } from '../bank-qr/bank-qr.module';
 import { DeliveryNoticeModule } from '../delivery-notice/delivery-notice.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { LocationAttachService } from './location-attach.service';
 import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
 
 @Module({
@@ -23,7 +24,7 @@ import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
     DeliveryNoticeModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, UnpaidOrdersExpiryCron],
-  exports: [OrdersService],
+  providers: [OrdersService, LocationAttachService, UnpaidOrdersExpiryCron],
+  exports: [OrdersService, LocationAttachService],
 })
 export class OrdersModule {}
