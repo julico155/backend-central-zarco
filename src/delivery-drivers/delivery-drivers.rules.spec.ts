@@ -2,6 +2,7 @@ import { DomainException } from '../common/exceptions/domain-exception';
 import {
   assertRoleCanMoveStatus,
   checkDriverPresence,
+  groupNearbyOrders,
   mapsUrl,
   presenceException,
   resolveHistoryDriverId,
@@ -70,6 +71,49 @@ describe('resolveHistoryDriverId', () => {
   it('admin y cajero pueden filtrar por un repartidor o ver todos (null)', () => {
     expect(resolveHistoryDriverId(admin, 'driver-2')).toBe('driver-2');
     expect(resolveHistoryDriverId(cashier, undefined)).toBeNull();
+  });
+});
+
+describe('groupNearbyOrders', () => {
+  // ~111m por 0.001° de latitud a esta latitud aprox. — separaciones elegidas
+  // para caer claramente adentro/afuera de un radio de 500m sin depender de
+  // precisión de punto flotante en el borde.
+  const near = (lat: number) => ({ latitude: lat, longitude: -66.16 });
+
+  it('dos pedidos cerca se reportan mutuamente, ordenados por distancia', () => {
+    const orders = [
+      { id: 'a', orderNumber: 'ORD-1', ...near(-17.39) },
+      { id: 'b', orderNumber: 'ORD-2', ...near(-17.3905) }, // ~55m
+      { id: 'c', orderNumber: 'ORD-3', ...near(-17.42) }, // ~2200m, lejos
+    ];
+    const result = groupNearbyOrders(orders, 500);
+    expect(result.get('a')).toEqual([{ id: 'b', orderNumber: 'ORD-2', distanceMeters: expect.any(Number) }]);
+    expect(result.get('b')).toEqual([{ id: 'a', orderNumber: 'ORD-1', distanceMeters: expect.any(Number) }]);
+    expect(result.get('c')).toEqual([]);
+  });
+
+  it('sin nadie cerca, lista vacía para todos', () => {
+    const orders = [
+      { id: 'a', orderNumber: 'ORD-1', ...near(-17.0) },
+      { id: 'b', orderNumber: 'ORD-2', ...near(-17.5) },
+    ];
+    const result = groupNearbyOrders(orders, 500);
+    expect(result.get('a')).toEqual([]);
+    expect(result.get('b')).toEqual([]);
+  });
+
+  it('un solo pedido no tiene con quién agruparse', () => {
+    const result = groupNearbyOrders([{ id: 'a', orderNumber: 'ORD-1', ...near(-17.39) }], 500);
+    expect(result.get('a')).toEqual([]);
+  });
+
+  it('nunca expone lat/lng en el resultado, solo id/orderNumber/distancia', () => {
+    const orders = [
+      { id: 'a', orderNumber: 'ORD-1', ...near(-17.39) },
+      { id: 'b', orderNumber: 'ORD-2', ...near(-17.3905) },
+    ];
+    const result = groupNearbyOrders(orders, 500);
+    expect(Object.keys(result.get('a')![0])).toEqual(['id', 'orderNumber', 'distanceMeters']);
   });
 });
 

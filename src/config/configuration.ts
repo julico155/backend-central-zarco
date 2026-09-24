@@ -50,6 +50,8 @@ export interface AppConfig {
   unpaidOrderTtlMinutes: number;
   /** Radio (m) alrededor del local dentro del cual un repartidor puede aceptar un pedido de delivery. */
   deliveryAcceptRadiusMeters: number;
+  /** Radio (m) entre dos pedidos "disponibles" para reportarlos como cercanos entre sí (nunca se expone su lat/lng cruda antes de aceptar). */
+  deliveryNearbyRadiusMeters: number;
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -110,6 +112,8 @@ export default (): AppConfig => ({
   posQrMode: process.env.POS_QR_MODE === 'manual' ? 'manual' : 'bank',
   deliveryAcceptRadiusMeters:
     Number(process.env.DELIVERY_ACCEPT_RADIUS_METERS) > 0 ? Number(process.env.DELIVERY_ACCEPT_RADIUS_METERS) : 150,
+  deliveryNearbyRadiusMeters:
+    Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) > 0 ? Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) : 500,
   unpaidOrderTtlMinutes:
     Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 10,
 });

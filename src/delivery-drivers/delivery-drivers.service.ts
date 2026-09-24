@@ -13,6 +13,7 @@ import { dateInBolivia } from '../common/time/service-window';
 import { resolveDateRange } from '../reports/reports.range';
 import {
   checkDriverPresence,
+  groupNearbyOrders,
   mapsUrl,
   presenceException,
   resolveHistoryDriverId,
@@ -26,6 +27,13 @@ export interface AvailableDeliveryOrder {
   /** Solo para informar: el envío se le paga al repartidor y no se cuadra en el sistema. */
   deliveryFeeAmount: number;
   readySince: string;
+  /**
+   * Otros pedidos disponibles a menos de `deliveryNearbyRadiusMeters` de
+   * ESTE — nunca la ubicación cruda del cliente (esa sigue oculta hasta
+   * aceptar, ver `MyDeliveryOrder`). Sirve para detectar dos pedidos que
+   * conviene llevarse en un solo viaje.
+   */
+  nearbyOrders: { id: string; orderNumber: string; distanceMeters: number }[];
 }
 
 export interface MyDeliveryOrder {
@@ -79,6 +87,8 @@ export class DeliveryDriversService {
         'delivery_distance_meters',
         'delivery_base_amount',
         'delivery_surcharge_amount',
+        'delivery_latitude',
+        'delivery_longitude',
         'updated_at',
       ])
       .where('status', '=', 'ready')
@@ -87,6 +97,22 @@ export class DeliveryDriversService {
       .orderBy('updated_at', 'asc')
       .execute();
     if (orders.length === 0) return [];
+
+    // Coordenadas SOLO entran acá, nunca al response — groupNearbyOrders
+    // devuelve distancias entre pedidos, jamás una lat/lng.
+    const withLocation = orders.filter(
+      (o): o is typeof o & { delivery_latitude: number; delivery_longitude: number } =>
+        o.delivery_latitude !== null && o.delivery_longitude !== null,
+    );
+    const nearby = groupNearbyOrders(
+      withLocation.map((o) => ({
+        id: o.id,
+        orderNumber: o.order_number,
+        latitude: o.delivery_latitude,
+        longitude: o.delivery_longitude,
+      })),
+      this.config.get('deliveryNearbyRadiusMeters', { infer: true }),
+    );
 
     const ids = orders.map((o) => o.id);
     const [items, promotions] = await Promise.all([
@@ -114,6 +140,7 @@ export class DeliveryDriversService {
       deliveryDistanceMeters: o.delivery_distance_meters,
       deliveryFeeAmount: Number(o.delivery_base_amount) + Number(o.delivery_surcharge_amount),
       readySince: new Date(o.updated_at).toISOString(),
+      nearbyOrders: nearby.get(o.id) ?? [],
     }));
   }
 

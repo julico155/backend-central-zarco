@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '../common/exceptions/domain-exception';
 import { DashboardUserRole, OrderDeliveryType, OrderStatus } from '../database/types';
+import { haversineMeters } from '../delivery/distance/distance.service';
 
 export type PresenceCheck =
   | { ok: true }
@@ -93,4 +94,48 @@ export function resolveHistoryDriverId(
 
 export function mapsUrl(latitude: number, longitude: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+}
+
+export interface OrderLocation {
+  id: string;
+  orderNumber: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface NearbyOrder {
+  id: string;
+  orderNumber: string;
+  distanceMeters: number;
+}
+
+/**
+ * Para "disponibles" (antes de aceptar) nunca se manda lat/lng cruda — es una
+ * decisión de privacidad explícita, el cliente no eligió que un repartidor al
+ * que todavía no le tocó el pedido vea su domicilio exacto. Pero el
+ * repartidor sí necesita poder detectar dos pedidos cercanos para llevárselos
+ * en un solo viaje, así que esto da SOLO la distancia entre pedidos
+ * disponibles entre sí (nunca respecto al local ni una coordenada), y solo
+ * para los que caen dentro de `radiusMeters`. Un pedido sin coordenadas
+ * (cotización todavía pendiente) queda sin entrada en el resultado.
+ */
+export function groupNearbyOrders(
+  orders: OrderLocation[],
+  radiusMeters: number,
+): Map<string, NearbyOrder[]> {
+  const result = new Map<string, NearbyOrder[]>();
+  for (const order of orders) result.set(order.id, []);
+
+  for (let i = 0; i < orders.length; i++) {
+    for (let j = i + 1; j < orders.length; j++) {
+      const a = orders[i];
+      const b = orders[j];
+      const distanceMeters = haversineMeters(a, b);
+      if (distanceMeters > radiusMeters) continue;
+      result.get(a.id)!.push({ id: b.id, orderNumber: b.orderNumber, distanceMeters });
+      result.get(b.id)!.push({ id: a.id, orderNumber: a.orderNumber, distanceMeters });
+    }
+  }
+  for (const list of result.values()) list.sort((x, y) => x.distanceMeters - y.distanceMeters);
+  return result;
 }
