@@ -1,4 +1,5 @@
 -- Up Migration
+-- DB AGENTE (AGENT_DATABASE_URL). Idempotente: no toca tablas que ya existan.
 -- Agent Core conversacional (Fase 2B): conversación, historial, ejecuciones e
 -- historial de control (pausa/reanudación). Aditiva, sin tocar tablas
 -- existentes. Puerto directo de supabase/migrations/0014_agent_foundation.sql
@@ -7,7 +8,7 @@
 -- last_message_at (Backend Central mantiene updated_at/derivados desde la
 -- aplicación, igual que el resto de las tablas de este repo).
 
-create table agent_conversations (
+create table if not exists agent_conversations (
   id                            uuid        primary key default gen_random_uuid(),
 
   -- Identidad durable. Solo dígitos: mismo criterio que normalizePhone().
@@ -89,14 +90,14 @@ create table agent_conversations (
            or first_ai_message_at <= last_ai_message_at)
 );
 
-create index idx_agent_conversations_last_message_at
+create index if not exists idx_agent_conversations_last_message_at
   on agent_conversations (last_message_at desc);
 
-create index idx_agent_conversations_paused
+create index if not exists idx_agent_conversations_paused
   on agent_conversations (paused_at desc)
   where state = 'paused';
 
-create index idx_agent_conversations_pause_expiry
+create index if not exists idx_agent_conversations_pause_expires_at
   on agent_conversations (pause_expires_at)
   where pause_expires_at is not null;
 
@@ -104,7 +105,7 @@ create index idx_agent_conversations_pause_expiry
 -- agent_messages — historial completo de mensajes reales del canal
 -- ============================================================================
 
-create table agent_messages (
+create table if not exists agent_messages (
   id                       uuid        primary key default gen_random_uuid(),
 
   agent_conversation_id    uuid        not null
@@ -161,18 +162,15 @@ create table agent_messages (
   )
 );
 
-create unique index uq_agent_messages_provider_message_id
-  on agent_messages (provider_message_id)
-  where provider_message_id is not null;
-
-create index ix_agent_messages_recent
-  on agent_messages (agent_conversation_id, message_timestamp desc, id desc);
+-- uq_agent_messages_provider_message_id y ix_agent_messages_recent: los crea
+-- 1700000036000 (la DB Agente real no los tiene todavía y el código depende del
+-- UNIQUE para deduplicar wamids).
 
 -- ============================================================================
 -- agent_runs — idempotencia y estado de la EJECUCIÓN del agente
 -- ============================================================================
 
-create table agent_runs (
+create table if not exists agent_runs (
   id                      uuid        primary key default gen_random_uuid(),
 
   agent_conversation_id   uuid        not null
@@ -255,18 +253,18 @@ create table agent_runs (
   )
 );
 
-create index ix_agent_runs_stale
+create index if not exists ix_agent_runs_stale
   on agent_runs (started_at)
   where status in ('processing', 'sending');
 
-create index ix_agent_runs_conversation
+create index if not exists ix_agent_runs_conversation
   on agent_runs (agent_conversation_id, created_at desc);
 
 -- ============================================================================
 -- agent_control_events — historial append-only de pausa/reanudación
 -- ============================================================================
 
-create table agent_control_events (
+create table if not exists agent_control_events (
   id                    uuid        primary key default gen_random_uuid(),
 
   agent_conversation_id uuid        not null
@@ -296,15 +294,14 @@ create table agent_control_events (
     check (metadata is null or jsonb_typeof(metadata) = 'object')
 );
 
-create unique index uq_agent_control_events_provider_action
+create unique index if not exists uq_agent_control_events_provider_action
   on agent_control_events (agent_conversation_id, action, provider_message_id)
   where provider_message_id is not null;
 
-create index ix_agent_control_events_conversation
+create index if not exists ix_agent_control_events_conversation
   on agent_control_events (agent_conversation_id, created_at desc);
 
 -- Down Migration
-drop table if exists agent_control_events;
-drop table if exists agent_runs;
-drop table if exists agent_messages;
-drop table if exists agent_conversations;
+-- Intencionalmente vacío: esta migración ADOPTA tablas que pueden existir ya
+-- con datos en la DB Agente (`create ... if not exists`), así que revertirla
+-- nunca borra tablas. Para descartar una DB de pruebas, bórrala entera.

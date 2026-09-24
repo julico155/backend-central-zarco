@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { randomUUID } from 'node:crypto';
-import { KYSELY } from '../database/database.module';
-import { Database } from '../database/types';
+import { AGENT_KYSELY } from '../database/agent-database.module';
+import { AgentDatabase } from '../database/agent-types';
 import { normalizeKapsoPayload } from '../kapso/kapso-normalizer';
 import { WebhookAcceptResult, WebhookEventRow } from './webhook-inbox.types';
 import { WebhookInboxDispatcher } from './webhook-inbox.dispatcher';
@@ -34,7 +34,7 @@ export class WebhookInboxService {
   private readonly logger = new Logger(WebhookInboxService.name);
 
   constructor(
-    @Inject(KYSELY) private readonly db: Kysely<Database>,
+    @Inject(AGENT_KYSELY) private readonly db: Kysely<AgentDatabase>,
     private readonly dispatcher: WebhookInboxDispatcher,
   ) {}
 

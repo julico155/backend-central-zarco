@@ -15,6 +15,8 @@ async function bootstrap() {
   // el parser default acá, éste igual intercepta el request antes de que
   // corra el de abajo, y el límite chico sigue aplicando.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // Cierra los pools de ambas bases (Central y Agente) en SIGTERM/SIGINT.
+  app.enableShutdownHooks();
   // Kapso firma los bytes exactos. Guardamos una copia no transformada para su
   // controlador, sin alterar el JSON disponible para los demás endpoints.
   app.use(

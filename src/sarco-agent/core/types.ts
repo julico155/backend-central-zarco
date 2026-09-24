@@ -11,7 +11,7 @@ import type {
   AgentMessageRole,
   AgentRunBarrier,
   AgentRunStatus,
-} from '../../database/types';
+} from '../../database/agent-types';
 
 /**
  * Contratos del Agent Core. Puerto directo de sarcoRestaurant

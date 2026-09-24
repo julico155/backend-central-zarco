@@ -19,6 +19,14 @@
     "migrate:up": "node-pg-migrate up --migration-file-language sql -m migrations",
     "migrate:down": "node-pg-migrate down --migration-file-language sql -m migrations",
     "migrate:create": "node-pg-migrate create --migration-file-language sql -m migrations",
+    "migrate:central:up": "node-pg-migrate up --migration-file-language sql -m migrations -d DATABASE_URL",
+    "migrate:central:down": "node-pg-migrate down --migration-file-language sql -m migrations -d DATABASE_URL",
+    "migrate:central:plan": "node-pg-migrate up --dry-run --migration-file-language sql -m migrations -d DATABASE_URL",
+    "migrate:central:create": "node-pg-migrate create --migration-file-language sql -m migrations",
+    "migrate:agent:up": "node-pg-migrate up --migration-file-language sql -m migrations-agent -d AGENT_DATABASE_URL",
+    "migrate:agent:down": "node-pg-migrate down --migration-file-language sql -m migrations-agent -d AGENT_DATABASE_URL",
+    "migrate:agent:plan": "node-pg-migrate up --dry-run --migration-file-language sql -m migrations-agent -d AGENT_DATABASE_URL",
+    "migrate:agent:create": "node-pg-migrate create --migration-file-language sql -m migrations-agent",
     "create-admin": "ts-node scripts/create-admin.ts"
   },
   "dependencies": {

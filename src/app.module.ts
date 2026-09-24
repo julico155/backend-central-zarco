@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
+import { AgentDatabaseModule } from './database/agent-database.module';
 import { CommonModule } from './common/common.module';
 import { GatewayClientModule } from './gateway-client/gateway-client.module';
 import { NotificationsOutModule } from './notifications-out/notifications-out.module';
@@ -31,6 +32,7 @@ import { SarcoPaymentProofModule } from './sarco-payment-proof/sarco-payment-pro
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    AgentDatabaseModule,
     CommonModule,
     GatewayClientModule,
     NotificationsOutModule,

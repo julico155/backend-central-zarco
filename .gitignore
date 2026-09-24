@@ -12,3 +12,6 @@ coverage/
 # Colección de Postman para probar la API del banco directo — el
 # environment trae credenciales reales de certificación, nunca al repo.
 postman/baneco-certificacion/
+
+# Reporte de introspección de la DB Agente (metadatos; no se versiona)
+agent-schema-report*.txt

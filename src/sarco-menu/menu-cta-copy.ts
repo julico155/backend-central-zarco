@@ -1,5 +1,5 @@
 import { businessHoursClock } from '../sarco-agent/business/facts';
-import type { MenuSendDeliveryReason } from '../database/types';
+import type { MenuSendDeliveryReason } from '../database/agent-types';
 
 /**
  * Copy del CTA "Ver menú". Puerto reducido de sarcoRestaurant

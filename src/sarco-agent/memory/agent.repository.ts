@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
-import { KYSELY } from '../../database/database.module';
-import { Database } from '../../database/types';
+import { AGENT_KYSELY } from '../../database/agent-database.module';
+import { AgentDatabase } from '../../database/agent-types';
 import { toAutomationAction, type ContextMessage } from '../core/context';
 import type {
   AgentConversationRef,
@@ -50,7 +50,7 @@ function isUniqueViolation(error: unknown): boolean {
  */
 @Injectable()
 export class AgentRepository implements AgentStore, AgentRunStore {
-  constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
+  constructor(@Inject(AGENT_KYSELY) private readonly db: Kysely<AgentDatabase>) {}
 
   /**
    * Semántica `greatest`/`least` sin leer-y-recalcular: UPDATE condicionales,

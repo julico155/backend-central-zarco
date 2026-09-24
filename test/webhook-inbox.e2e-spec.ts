@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { WebhookInboxDispatcher } from '../src/webhook-inbox/webhook-inbox.dispatcher';
 import { WebhookInboxService } from '../src/webhook-inbox/webhook-inbox.service';
-import { createTestDb, describeIfDb } from './utils/test-db';
+import { createAgentTestDb, describeIfAgentDb } from './utils/test-db';
 
-describeIfDb('webhook_events inbox (integración PostgreSQL)', () => {
+describeIfAgentDb('webhook_events inbox (integración PostgreSQL)', () => {
   const eventIds: string[] = [];
-  let db: ReturnType<typeof createTestDb>;
+  let db: ReturnType<typeof createAgentTestDb>;
   let dispatch: jest.Mock;
   let serviceA: WebhookInboxService;
   let serviceB: WebhookInboxService;
 
   beforeAll(() => {
-    db = createTestDb();
+    db = createAgentTestDb();
     dispatch = jest.fn().mockResolvedValue(undefined);
     const dispatcher = { dispatch } as unknown as WebhookInboxDispatcher;
     serviceA = new WebhookInboxService(db, dispatcher);

@@ -1,10 +1,11 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { Database } from './types';
 import { AppConfig } from '../config/configuration';
 
+/** Conexión a la DB CENTRAL (negocio): DATABASE_URL. La del agente es AGENT_KYSELY. */
 export const KYSELY = Symbol('KYSELY');
 
 @Global()
@@ -25,4 +26,10 @@ export const KYSELY = Symbol('KYSELY');
   ],
   exports: [KYSELY],
 })
-export class DatabaseModule {}
+export class DatabaseModule implements OnApplicationShutdown {
+  constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.db.destroy();
+  }
+}

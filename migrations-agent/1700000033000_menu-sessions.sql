@@ -1,4 +1,7 @@
 -- Up Migration
+-- DB AGENTE (AGENT_DATABASE_URL). Idempotente: no toca tablas que ya existan.
+-- Cambio respecto de la versión previa (nunca aplicada): `replaces_order_id` ya
+-- no referencia `orders`, porque `orders` está en otra base de datos.
 -- Menú web de WhatsApp (Fase 2C): sesión segura del enlace "Ver menú" y
 -- ledger de envíos del CTA. Aditiva. Puerto de sarcoRestaurant
 -- (supabase/migrations/0002_menu_sessions.sql, 0015_menu_send_deliveries.sql,
@@ -18,7 +21,7 @@
 -- DISTINTO para la misma sesión choca con `idempotency_key_reused` (409) —
 -- ver menu-order.service.ts.
 
-create table menu_sessions (
+create table if not exists menu_sessions (
   id                 uuid primary key default gen_random_uuid(),
   source_message_id  text not null unique,
   token_hash         text not null unique check (token_hash ~ '^[0-9a-f]{64}$'),
@@ -26,20 +29,21 @@ create table menu_sessions (
   phone_number_id    text not null check (btrim(phone_number_id) <> ''),
   created_at         timestamptz not null default now(),
   expires_at         timestamptz not null default (now() + interval '2 hours'),
-  replaces_order_id  uuid references orders (id) on delete set null,
+  -- uuid SIN clave foránea: el pedido vive en la DB Central, no en esta.
+  replaces_order_id  uuid,
   constraint menu_sessions_expires_after_created check (expires_at > created_at)
 );
 
-create index idx_menu_sessions_expires_at on menu_sessions (expires_at);
-create index idx_menu_sessions_customer_phone on menu_sessions (customer_phone);
-create index ix_menu_sessions_replaces_order
+create index if not exists idx_menu_sessions_expires_at on menu_sessions (expires_at);
+-- idx_menu_sessions_customer_phone: lo crea 1700000036000 (la DB Agente real no lo tiene).
+create index if not exists ix_menu_sessions_replaces_order
   on menu_sessions (replaces_order_id)
   where replaces_order_id is not null;
 
 -- Ledger de envíos del CTA "Ver menú". Tabla separada de menu_sessions (no
 -- guarda token ni hash): protege la idempotencia técnica del ENVÍO, no la
 -- sesión en sí.
-create table menu_send_deliveries (
+create table if not exists menu_send_deliveries (
   id                   uuid primary key default gen_random_uuid(),
   customer_phone       text not null check (btrim(customer_phone) <> ''),
   source_message_id    text not null unique,
@@ -61,10 +65,11 @@ create table menu_send_deliveries (
   )
 );
 
-create index ix_menu_send_deliveries_recent
+create index if not exists ix_menu_send_deliveries_recent
   on menu_send_deliveries (customer_phone, completed_at desc)
   where status = 'sent';
 
 -- Down Migration
-drop table if exists menu_send_deliveries;
-drop table if exists menu_sessions;
+-- Intencionalmente vacío: esta migración ADOPTA tablas que pueden existir ya
+-- con datos en la DB Agente (`create ... if not exists`), así que revertirla
+-- nunca borra tablas. Para descartar una DB de pruebas, bórrala entera.

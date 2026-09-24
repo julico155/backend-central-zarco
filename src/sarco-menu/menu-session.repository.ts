@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Kysely } from 'kysely';
-import { KYSELY } from '../database/database.module';
-import { Database } from '../database/types';
+import { AGENT_KYSELY } from '../database/agent-database.module';
+import { AgentDatabase } from '../database/agent-types';
 
 export interface MenuSession {
   id: string;
@@ -59,7 +59,7 @@ function toSession(row: {
  */
 @Injectable()
 export class MenuSessionRepository {
-  constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
+  constructor(@Inject(AGENT_KYSELY) private readonly db: Kysely<AgentDatabase>) {}
 
   async findByHash(
     tokenHash: string,

@@ -3,7 +3,7 @@ import type {
   AgentMessageActor,
   AgentMessageContentType,
   AgentMessageRole,
-} from '../../database/types';
+} from '../../database/agent-types';
 
 /**
  * Ventana de contexto del modelo. Puerto directo de sarcoRestaurant

@@ -5,7 +5,10 @@ export interface ServiceAuthConfig {
 
 export interface AppConfig {
   port: number;
+  /** DB CENTRAL (negocio). Conexión KYSELY. */
   databaseUrl: string;
+  /** DB AGENTE (WhatsApp/agente/menú). Conexión AGENT_KYSELY, independiente: nunca cae a databaseUrl. */
+  agentDatabaseUrl: string;
   /** Orígenes permitidos por CORS. Vacío = ninguno (el backend queda solo para clientes que no son navegadores). */
   corsOrigins: string[];
   serviceAuth: ServiceAuthConfig;
@@ -147,6 +150,7 @@ function parseCorsOrigins(raw: string | undefined): string[] {
 export default (): AppConfig => ({
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: process.env.DATABASE_URL ?? '',
+  agentDatabaseUrl: process.env.AGENT_DATABASE_URL ?? '',
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   serviceAuth: {
     tokens: parseServiceAuthTokens(process.env.SERVICE_AUTH_TOKENS),

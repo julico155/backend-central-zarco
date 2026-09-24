@@ -1,5 +1,5 @@
 import type { AgentStore } from '../core/types';
-import type { AgentControlSource } from '../../database/types';
+import type { AgentControlSource } from '../../database/agent-types';
 import { pauseExpiryFrom } from './takeover';
 
 /**

@@ -1,7 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Kysely } from 'kysely';
-import { KYSELY } from '../database/database.module';
-import { Database, MenuSendDeliveryReason, MenuSendDeliveryStatus } from '../database/types';
+import { AGENT_KYSELY } from '../database/agent-database.module';
+import {
+  AgentDatabase,
+  MenuSendDeliveryReason,
+  MenuSendDeliveryStatus,
+} from '../database/agent-types';
 
 export type ClaimMenuSendDeliveryResult = { claimed: true; id: string } | { claimed: false };
 
@@ -20,7 +24,7 @@ export interface FinishMenuSendDeliveryInput {
  */
 @Injectable()
 export class MenuSendDeliveryRepository {
-  constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
+  constructor(@Inject(AGENT_KYSELY) private readonly db: Kysely<AgentDatabase>) {}
 
   /** INSERT ... ON CONFLICT (source_message_id) DO NOTHING — atómico. */
   async claim(

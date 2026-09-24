@@ -4,7 +4,7 @@ import {
   type InsertControlEventResult,
   type ResumeAgentResult,
 } from '../core/types';
-import type { AgentControlSource } from '../../database/types';
+import type { AgentControlSource } from '../../database/agent-types';
 
 /**
  * Resume de una conversación pausada. Puerto directo de sarcoRestaurant
