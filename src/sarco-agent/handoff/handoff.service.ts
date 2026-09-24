@@ -7,16 +7,15 @@ import {
 } from '../core/types';
 import type { HandoffPort } from '../tools/request-human';
 import { canHandOff } from './handoff-gate';
+import type { HandoffNotifier } from './handoff-notice.service';
 import { isExplicitHumanRequest } from './explicit-request';
 import { hasProblemSignal } from './problem-signal';
 
 /**
  * Derivar una conversación a una persona. Puerto directo de sarcoRestaurant
- * (src/lib/agent/handoff/service.ts), con UNA diferencia deliberada: el paso
- * de AVISAR al equipo (Telegram) todavía no está implementado en Backend
- * Central — la tarea de esta fase lo excluye explícitamente. La pausa SÍ es
- * real y funcional; el aviso queda como un log, documentado, para cuando
- * exista el canal de alertas.
+ * (src/lib/agent/handoff/service.ts). El aviso al equipo (Telegram, chat de
+ * atención humana) sale por `notify` (HandoffNoticeService → notification_jobs);
+ * sin `notify` (tests, agente sin canal) solo queda el log.
  *
  * Son dos cosas, en este orden:
  *   0. COMPROBAR — ¿hay un motivo en el mensaje para derivar?
@@ -31,7 +30,7 @@ const logger = new Logger('SarcoAgentHandoff');
 /** Minutos que calla el agente tras derivar. */
 export const HANDOFF_PAUSE_MINUTES = 120;
 
-export function createHandoffPort(store: AgentStore): HandoffPort {
+export function createHandoffPort(store: AgentStore, notify?: HandoffNotifier): HandoffPort {
   return {
     async escalate({ customerPhone, sourceMessageId, inboundText }) {
       const explicitRequest = isExplicitHumanRequest(inboundText);
@@ -58,9 +57,12 @@ export function createHandoffPort(store: AgentStore): HandoffPort {
 
       if (pausa.pause === 'already_applied') return { handed: true };
 
-      // TODO(2C+): aviso real al equipo (Telegram u otro canal). Por ahora
-      // solo queda registrado que la derivación ocurrió.
       logger.log(`agent_handoff_escalated reason=${PAUSE_REASON_HANDOFF_REQUESTED}`);
+      await notify?.({
+        customerPhone,
+        reason: PAUSE_REASON_HANDOFF_REQUESTED,
+        lastMessage: inboundText,
+      });
 
       return { handed: true };
     },
@@ -77,6 +79,7 @@ export const HANDOFF_SPOKEN_PAUSE_MINUTES = 30;
  */
 export function createSilenceAfterSpokenHandoff(
   store: AgentStore,
+  notify?: HandoffNotifier,
 ): (input: {
   customerPhone: string;
   sourceMessageId: string;
@@ -97,7 +100,11 @@ export function createSilenceAfterSpokenHandoff(
 
     if (pausa.result !== 'ok' || pausa.pause === 'already_applied') return;
 
-    // TODO(2C+): aviso real al equipo (Telegram u otro canal).
     logger.log(`agent_handoff_escalated reason=${PAUSE_REASON_HANDOFF_SPOKEN}`);
+    await notify?.({
+      customerPhone: input.customerPhone,
+      reason: PAUSE_REASON_HANDOFF_SPOKEN,
+      lastMessage: input.inboundText,
+    });
   };
 }

@@ -29,6 +29,7 @@ import { DeliveryService } from '../delivery/delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
+import { DeliveryNoticeService } from '../delivery-notice/delivery-notice.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 
@@ -139,6 +140,7 @@ export class OrdersService {
     private readonly cashRegister: CashRegisterService,
     private readonly qrPayments: QrPaymentsService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly deliveryNotice: DeliveryNoticeService,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -812,6 +814,34 @@ export class OrdersService {
     return toLateOrderRequestAcceptedResponse(winner);
   }
 
+  /**
+   * Override humano del cobro de envío (KDS): true = "envío pagado", false =
+   * "cobrar envío". Escribe la marca y su fecha juntas (CHECK de coherencia).
+   * Solo aplica a pedidos de delivery.
+   */
+  async setDeliveryFeePaid(
+    orderId: string,
+    paid: boolean,
+  ): Promise<{ orderId: string; deliveryFeePaid: boolean }> {
+    const updated = await this.db
+      .updateTable('orders')
+      .set({ delivery_fee_paid: paid, delivery_fee_paid_at: new Date(), updated_at: new Date() })
+      .where('id', '=', orderId)
+      .where('delivery_type', '=', 'delivery')
+      .returning('id')
+      .executeTakeFirst();
+    if (!updated) {
+      const exists = await this.db
+        .selectFrom('orders')
+        .select('id')
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      if (!exists) throw new NotFoundDomainError('order', orderId);
+      throw new ValidationError('El pedido no es de delivery.');
+    }
+    return { orderId: updated.id, deliveryFeePaid: paid };
+  }
+
   async requestLocation(orderId: string): Promise<void> {
     const order = await this.db
       .selectFrom('orders')
@@ -1076,17 +1106,9 @@ export class OrdersService {
     // pata se dispara el aviso de pago aceptado (payment-attempts.service.ts).
     if (fullyPaid) {
       try {
-        if (updated.delivery_type === 'delivery') {
-          await this.notifications.notifyNow({
-            channel: 'telegram',
-            kind: 'cash_confirmed_delivery_notice',
-            targetRef: updated.id,
-            payload: {
-              chatRef: 'delivery-group',
-              text: `Pedido ${updated.order_number} confirmado en efectivo.`,
-            },
-          });
-        }
+        // Aviso completo al grupo de motos (kind delivery_notice); solo sale si
+        // el pedido ya está cotizado y con ubicación — si no, lo emite la cotización.
+        await this.deliveryNotice.tryNotify(updated.id);
         if (updated.customer_id) {
           await this.notifications.notifyNow({
             channel: 'whatsapp',

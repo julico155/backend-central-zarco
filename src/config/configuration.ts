@@ -110,6 +110,16 @@ export interface AppConfig {
     /** Alias adicionales del banco (siglas, nombre largo), separados por "|". */
     expectedBankAliases: string;
   };
+  /** Telegram directo (Fase 2E): avisos al grupo de reparto y de atención humana. */
+  telegram: {
+    botToken: string;
+    /** Grupo de reparto (y 'staff-group', que sarcoRestaurant ya mapeaba al mismo chat). */
+    chatId: string;
+    /** Grupo de atención humana. Vacío = cae al chat de reparto (igual que sarcoRestaurant). */
+    handoffChatId: string;
+    /** Solo para pruebas/proxys. Vacío = https://api.telegram.org. */
+    apiBaseUrl: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -218,5 +228,11 @@ export default (): AppConfig => ({
     expectedHolderAliases: process.env.PAYMENT_PROOF_EXPECTED_HOLDER_ALIASES ?? '',
     expectedBank: process.env.PAYMENT_PROOF_EXPECTED_BANK ?? '',
     expectedBankAliases: process.env.PAYMENT_PROOF_EXPECTED_BANK_ALIASES ?? '',
+  },
+  telegram: {
+    botToken: (process.env.TELEGRAM_BOT_TOKEN ?? '').trim(),
+    chatId: (process.env.TELEGRAM_CHAT_ID ?? '').trim(),
+    handoffChatId: (process.env.TELEGRAM_HANDOFF_CHAT_ID ?? '').trim(),
+    apiBaseUrl: (process.env.TELEGRAM_API_BASE_URL ?? '').trim().replace(/\/+$/, ''),
   },
 });

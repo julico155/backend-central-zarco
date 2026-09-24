@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { NotificationsOutService } from '../src/notifications-out/notifications-out.service';
 import { createTestDb, describeIfDb } from './utils/test-db';
 
-const fakeGateway = {
-  sendTelegramAlert: jest.fn().mockResolvedValue({ externalMessageId: 'telegram-test-id' }),
-  sendWhatsappMessage: jest.fn().mockResolvedValue({ externalMessageId: 'whatsapp-test-id' }),
-  requestWhatsappLocation: jest.fn().mockResolvedValue(undefined),
+const fakeTelegram = {
+  send: jest.fn().mockResolvedValue({ ok: true, messageId: '4242' }),
+};
+const fakeKapso = {
+  sendText: jest.fn().mockResolvedValue({ ok: true, wamid: 'wamid-test-id' }),
 };
 
 interface ClaimService {
@@ -15,7 +16,7 @@ interface ClaimService {
 
 /**
  * Requiere Postgres real con migraciones aplicadas y DATABASE_URL de test.
- * No llama proveedores: GatewayClientService es un fake local.
+ * No llama proveedores: TelegramService y KapsoOutboundService son fakes locales.
  */
 describeIfDb('notification_jobs claim (integración PostgreSQL)', () => {
   const targetRefs: string[] = [];
@@ -25,8 +26,16 @@ describeIfDb('notification_jobs claim (integración PostgreSQL)', () => {
 
   beforeAll(() => {
     db = createTestDb();
-    serviceA = new NotificationsOutService(db, fakeGateway as never) as unknown as ClaimService;
-    serviceB = new NotificationsOutService(db, fakeGateway as never) as unknown as ClaimService;
+    serviceA = new NotificationsOutService(
+      db,
+      fakeTelegram as never,
+      fakeKapso as never,
+    ) as unknown as ClaimService;
+    serviceB = new NotificationsOutService(
+      db,
+      fakeTelegram as never,
+      fakeKapso as never,
+    ) as unknown as ClaimService;
   });
 
   afterEach(async () => {
@@ -83,14 +92,14 @@ describeIfDb('notification_jobs claim (integración PostgreSQL)', () => {
     await seed('sending', new Date(Date.now() + 60_000).toISOString());
 
     await expect(serviceA.recoverFailedJobs()).resolves.toEqual({ claimed: 0 });
-    expect(fakeGateway.sendTelegramAlert).not.toHaveBeenCalled();
+    expect(fakeTelegram.send).not.toHaveBeenCalled();
   });
 
   it('recovery reclaims a sending job with an expired lease', async () => {
     const id = await seed('sending', new Date(Date.now() - 60_000).toISOString());
 
     await expect(serviceA.recoverFailedJobs()).resolves.toEqual({ claimed: 1 });
-    expect(fakeGateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(fakeTelegram.send).toHaveBeenCalledTimes(1);
     await expect(
       db
         .selectFrom('notification_jobs')
@@ -106,6 +115,6 @@ describeIfDb('notification_jobs claim (integración PostgreSQL)', () => {
     const results = await Promise.all([serviceA.recoverFailedJobs(), serviceB.recoverFailedJobs()]);
 
     expect(results[0].claimed + results[1].claimed).toBe(1);
-    expect(fakeGateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(fakeTelegram.send).toHaveBeenCalledTimes(1);
   });
 });

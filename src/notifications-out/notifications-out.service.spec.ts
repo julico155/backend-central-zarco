@@ -122,15 +122,19 @@ function fakeDb(state: JobState) {
 
 function setup(state = job()) {
   const { db, queries } = fakeDb(state);
-  const gateway = {
-    sendTelegramAlert: jest.fn().mockResolvedValue({ externalMessageId: '123' }),
-    sendWhatsappMessage: jest.fn().mockResolvedValue({ externalMessageId: 'wamid-1' }),
-    requestWhatsappLocation: jest.fn().mockResolvedValue(undefined),
+  const telegram = {
+    send: jest.fn().mockResolvedValue({ ok: true, messageId: '123' }),
   };
-  const service = new NotificationsOutService(db, gateway as never);
+  const kapso = {
+    sendText: jest.fn().mockResolvedValue({ ok: true, wamid: 'wamid-1' }),
+    sendLocationRequest: jest.fn().mockResolvedValue({ ok: true, wamid: 'wamid-loc' }),
+    uploadImage: jest.fn().mockResolvedValue({ ok: true, mediaId: 'media-1' }),
+    sendImageByMediaId: jest.fn().mockResolvedValue({ ok: true, wamid: 'wamid-img' }),
+  };
+  const service = new NotificationsOutService(db, telegram as never, kapso as never);
   const privateService = service as unknown as { enqueue(job: unknown): Promise<string> };
   jest.spyOn(privateService, 'enqueue').mockResolvedValue('00000000-0000-0000-0000-000000000001');
-  return { service, gateway, queries, state };
+  return { service, telegram, kapso, queries, state };
 }
 
 describe('NotificationsOutService ownership claims', () => {
@@ -144,7 +148,7 @@ describe('NotificationsOutService ownership claims', () => {
       payload: { chatRef: 'staff-group', text: 'hola' },
     });
 
-    expect(h.gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(h.telegram.send).toHaveBeenCalledTimes(1);
     expect(h.state).toMatchObject({
       status: 'sent',
       attempts: 1,
@@ -170,7 +174,7 @@ describe('NotificationsOutService ownership claims', () => {
       payload: { chatRef: 'staff-group', text: 'hola' },
     });
 
-    expect(h.gateway.sendTelegramAlert).not.toHaveBeenCalled();
+    expect(h.telegram.send).not.toHaveBeenCalled();
     expect(h.state.status).toBe(status);
   });
 
@@ -184,7 +188,7 @@ describe('NotificationsOutService ownership claims', () => {
       payload: { chatRef: 'staff-group', text: 'hola' },
     });
 
-    expect(h.gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(h.telegram.send).toHaveBeenCalledTimes(1);
     expect(h.state).toMatchObject({ status: 'sent', attempts: 2 });
   });
 
@@ -199,7 +203,7 @@ describe('NotificationsOutService ownership claims', () => {
 
     await Promise.all([h.service.notifyNow(input), h.service.notifyNow(input)]);
 
-    expect(h.gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(h.telegram.send).toHaveBeenCalledTimes(1);
     expect(h.state).toMatchObject({ status: 'sent', attempts: 1 });
   });
 
@@ -213,7 +217,7 @@ describe('NotificationsOutService ownership claims', () => {
     );
 
     await expect(h.service.recoverFailedJobs()).resolves.toEqual({ claimed: 0 });
-    expect(h.gateway.sendTelegramAlert).not.toHaveBeenCalled();
+    expect(h.telegram.send).not.toHaveBeenCalled();
   });
 
   it('recovery reclaims a sending job whose lease expired', async () => {
@@ -226,7 +230,7 @@ describe('NotificationsOutService ownership claims', () => {
     );
 
     await expect(h.service.recoverFailedJobs()).resolves.toEqual({ claimed: 1 });
-    expect(h.gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(h.telegram.send).toHaveBeenCalledTimes(1);
     expect(h.queries[0]).toContain('for update skip locked');
   });
 
@@ -282,7 +286,7 @@ describe('NotificationsOutService ownership claims', () => {
 
   it('clears the claim and schedules backoff after a send failure', async () => {
     const h = setup();
-    h.gateway.sendTelegramAlert.mockRejectedValueOnce(new Error('down'));
+    h.telegram.send.mockRejectedValueOnce(new Error('down'));
 
     await h.service.notifyNow({
       channel: 'telegram',
@@ -310,25 +314,191 @@ describe('NotificationsOutService ownership claims', () => {
     });
     await expect(h.service.recoverFailedJobs()).resolves.toEqual({ claimed: 0 });
 
-    expect(h.gateway.sendTelegramAlert).not.toHaveBeenCalled();
+    expect(h.telegram.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotificationsOutService transportes directos (sin gateway de Sarco)', () => {
+  type Internals = {
+    customerPhone(id: string): Promise<string>;
+    loadImage(url: string): Promise<{ bytes: Buffer; mimeType: string }>;
+    send(
+      channel: string,
+      kind: string,
+      payload: Record<string, unknown>,
+    ): Promise<string | undefined>;
+  };
+  function direct() {
+    const h = setup();
+    const internals = h.service as unknown as Internals;
+    jest.spyOn(internals, 'customerPhone').mockResolvedValue('59170000000');
+    return { ...h, internals };
+  }
+
+  let fetchSpy: jest.SpyInstance;
+  beforeEach(() => {
+    fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(() => {
+      throw new Error('no debe haber red real');
+    });
+  });
+  afterEach(() => fetchSpy.mockRestore());
+
+  it('telegram: manda por TelegramService con chatRef, parse_mode HTML y sin botones; devuelve el message_id', async () => {
+    const h = direct();
+
+    const id = await h.internals.send('telegram', 'delivery_notice', {
+      chatRef: 'delivery-group',
+      text: '<b>hola</b>',
+      parseMode: 'HTML',
+      buttons: [{ label: 'Aceptar', action: 'x' }],
+    });
+
+    expect(h.telegram.send).toHaveBeenCalledWith({
+      chatRef: 'delivery-group',
+      text: '<b>hola</b>',
+      parseMode: 'HTML',
+      editMessageId: undefined,
+    });
+    expect(id).toBe('123');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps the existing sender selection for WhatsApp and location requests', async () => {
-    const whatsapp = setup();
-    const whatsappPrivate = whatsapp.service as unknown as {
-      send(channel: string, kind: string, payload: Record<string, unknown>): Promise<string | null>;
-    };
-    await whatsappPrivate.send('whatsapp', 'payment_decision', {
+  it('telegram: el message_id devuelto queda en notification_jobs.external_message_id', async () => {
+    const h = setup();
+
+    await h.service.notifyNow({
+      channel: 'telegram',
+      kind: 'delivery_notice',
+      targetRef: 'order-1',
+      payload: { chatRef: 'delivery-group', text: 'x' },
+    });
+
+    expect(h.state).toMatchObject({ status: 'sent', externalMessageId: '123' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('telegram: una respuesta ok:false deja el job en failed para reintento', async () => {
+    const h = setup();
+    h.telegram.send.mockResolvedValueOnce({ ok: false, error: 'http_error', status: 500 });
+
+    await h.service.notifyNow({
+      channel: 'telegram',
+      kind: 'delivery_notice',
+      targetRef: 'order-1',
+      payload: { chatRef: 'delivery-group', text: 'x' },
+    });
+
+    expect(h.state).toMatchObject({ status: 'failed', claimToken: null, due: false });
+  });
+
+  it('whatsapp texto: resuelve el teléfono del cliente y manda por Kapso', async () => {
+    const h = direct();
+
+    const id = await h.internals.send('whatsapp', 'payment_decision', {
       customerId: 'customer-1',
       text: 'ok',
     });
-    expect(whatsapp.gateway.sendWhatsappMessage).toHaveBeenCalledTimes(1);
 
-    const location = setup();
-    const locationPrivate = location.service as unknown as {
-      send(channel: string, kind: string, payload: Record<string, unknown>): Promise<string | null>;
+    expect(h.internals.customerPhone).toHaveBeenCalledWith('customer-1');
+    expect(h.kapso.sendText).toHaveBeenCalledWith('59170000000', 'ok');
+    expect(id).toBe('wamid-1');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('location_request: pide la ubicación directo por Kapso', async () => {
+    const h = direct();
+
+    const id = await h.internals.send('whatsapp', 'location_request', { customerId: 'customer-1' });
+
+    expect(h.kapso.sendLocationRequest).toHaveBeenCalledWith('59170000000');
+    expect(h.kapso.sendText).not.toHaveBeenCalled();
+    expect(id).toBe('wamid-loc');
+  });
+
+  it('whatsapp con imagen (QR): sube los bytes a Kapso y manda por media id con el texto de pie', async () => {
+    const h = direct();
+    jest
+      .spyOn(h.internals, 'loadImage')
+      .mockResolvedValue({ bytes: Buffer.from('png'), mimeType: 'image/png' });
+
+    const id = await h.internals.send('whatsapp', 'qr_confirmation', {
+      customerId: 'customer-1',
+      text: 'Escaneá el QR',
+      imageUrl: '/orders/00000000-0000-0000-0000-000000000001/qr-image',
+    });
+
+    expect(h.kapso.uploadImage).toHaveBeenCalledWith(Buffer.from('png'), 'image/png');
+    expect(h.kapso.sendImageByMediaId).toHaveBeenCalledWith(
+      '59170000000',
+      'media-1',
+      'Escaneá el QR',
+    );
+    expect(id).toBe('wamid-img');
+  });
+
+  it('whatsapp: un fallo de Kapso lanza (el job se reintenta) sin filtrar el teléfono', async () => {
+    const h = direct();
+    h.kapso.sendText.mockResolvedValueOnce({ ok: false, error: 'http_error', status: 502 });
+
+    await expect(
+      h.internals.send('whatsapp', 'payment_decision', { customerId: 'c', text: 'ok' }),
+    ).rejects.toThrow('kapso_http_error_502');
+  });
+
+  it('whatsapp con una imageUrl que no es el QR interno se rechaza', async () => {
+    const h = direct();
+
+    await expect(
+      h.internals.send('whatsapp', 'x', { customerId: 'c', text: 't', imageUrl: '/otra/ruta.png' }),
+    ).rejects.toThrow('unsupported_image_url');
+    expect(h.kapso.uploadImage).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotificationsOutService dedupe de delivery_notice (kind + target_ref)', () => {
+  it('encolar dos veces el mismo delivery_notice usa ON CONFLICT (kind, target_ref) DO NOTHING y reutiliza la fila existente', async () => {
+    const statements: string[] = [];
+    let insertCount = 0;
+    const client = {
+      query: async (sqlText: string) => {
+        const text = sqlText.replace(/\s+/g, ' ').trim().toLowerCase();
+        statements.push(text);
+        if (text.startsWith('insert into "notification_jobs"')) {
+          insertCount += 1;
+          // la 1ª inserta; la 2ª choca con el UNIQUE y no devuelve fila
+          return insertCount === 1
+            ? { command: 'INSERT', rowCount: 1, rows: [{ id: 'job-1' }] }
+            : { command: 'INSERT', rowCount: 0, rows: [] };
+        }
+        if (text.startsWith('select "id" from "notification_jobs"')) {
+          return { command: 'SELECT', rowCount: 1, rows: [{ id: 'job-1' }] };
+        }
+        throw new Error(`Unexpected SQL: ${text}`);
+      },
+      release: () => undefined,
     };
-    await locationPrivate.send('whatsapp', 'location_request', { customerId: 'customer-1' });
-    expect(location.gateway.requestWhatsappLocation).toHaveBeenCalledTimes(1);
+    const db = new Kysely<Database>({
+      dialect: new PostgresDialect({
+        pool: { connect: async () => client, end: async () => undefined } as never,
+      }),
+    });
+    const service = new NotificationsOutService(db, {} as never, {} as never);
+    const enqueue = (service as unknown as { enqueue(job: unknown): Promise<string> }).enqueue.bind(
+      service,
+    );
+    const job = {
+      channel: 'telegram',
+      kind: 'delivery_notice',
+      targetRef: 'order-uuid',
+      payload: { chatRef: 'delivery-group', text: 'x' },
+    };
+
+    const first = await enqueue(job);
+    const second = await enqueue(job);
+
+    expect(first).toBe('job-1');
+    expect(second).toBe('job-1');
+    expect(statements.filter((t) => t.startsWith('insert'))).toHaveLength(2);
+    expect(statements[0]).toContain('on conflict ("kind", "target_ref") do nothing');
   });
 });

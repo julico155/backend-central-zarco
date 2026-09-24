@@ -4,6 +4,8 @@ import { ProductsModule } from '../products/products.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { SarcoMenuModule } from '../sarco-menu/sarco-menu.module';
 import { SarcoPaymentProofModule } from '../sarco-payment-proof/sarco-payment-proof.module';
+import { NotificationsOutModule } from '../notifications-out/notifications-out.module';
+import { HandoffNoticeService } from './handoff/handoff-notice.service';
 import { AgentRepository } from './memory/agent.repository';
 import { KapsoAgentMediaResolver } from './kapso-media-resolver.adapter';
 import { MenuCatalogAdapter } from './menu-catalog.adapter';
@@ -26,8 +28,15 @@ import { SarcoAgentService } from './sarco-agent.service';
     CategoriesModule,
     SarcoMenuModule,
     SarcoPaymentProofModule,
+    NotificationsOutModule,
   ],
-  providers: [AgentRepository, KapsoAgentMediaResolver, MenuCatalogAdapter, SarcoAgentService],
+  providers: [
+    AgentRepository,
+    KapsoAgentMediaResolver,
+    MenuCatalogAdapter,
+    HandoffNoticeService,
+    SarcoAgentService,
+  ],
   exports: [SarcoAgentService, AgentRepository],
 })
 export class SarcoAgentModule {}

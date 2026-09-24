@@ -2,8 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { GatewayClientService } from '../gateway-client/gateway-client.service';
-import {
+import { KapsoOutboundService } from '../kapso/kapso-outbound.service';
+import { TelegramService } from '../telegram/telegram.service';
+import type {
   TelegramAlertPayload,
   WhatsappLocationRequestPayload,
   WhatsappMessagePayload,
@@ -40,7 +41,8 @@ export class NotificationsOutService {
 
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<Database>,
-    private readonly gateway: GatewayClientService,
+    private readonly telegram: TelegramService,
+    private readonly kapso: KapsoOutboundService,
   ) {}
 
   /** Encola el trabajo (dedupe por kind+target_ref) e intenta enviarlo ya. */
@@ -192,26 +194,77 @@ export class NotificationsOutService {
     `.execute(this.db);
   }
 
+  /**
+   * Transportes DIRECTOS (sin pasar por el gateway HTTP de sarcoRestaurant):
+   * Telegram → TelegramService, WhatsApp → KapsoOutboundService. Un fallo
+   * lanza y `dispatch` lo convierte en reintento con backoff.
+   */
   private async send(
     channel: string,
     kind: string,
     payload: Record<string, unknown>,
   ): Promise<string | undefined> {
     if (channel === 'telegram') {
-      const result = await this.gateway.sendTelegramAlert(
-        payload as unknown as TelegramAlertPayload,
-      );
-      return result.externalMessageId;
+      const alert = payload as unknown as TelegramAlertPayload;
+      // `buttons` se ignora a propósito: no hay callback_query ni webhook de
+      // Telegram, y el gateway anterior rechazaba cualquier mensaje con botones.
+      const result = await this.telegram.send({
+        chatRef: alert.chatRef,
+        text: alert.text,
+        parseMode: alert.parseMode,
+        editMessageId: alert.editMessageId,
+      });
+      if (!result.ok)
+        throw new Error(`telegram_${result.error}${result.status ? `_${result.status}` : ''}`);
+      return result.messageId;
     }
+
     if (kind === 'location_request') {
-      await this.gateway.requestWhatsappLocation(
-        payload as unknown as WhatsappLocationRequestPayload,
-      );
-      return undefined;
+      const request = payload as unknown as WhatsappLocationRequestPayload;
+      const phone = await this.customerPhone(request.customerId);
+      const sent = await this.kapso.sendLocationRequest(phone);
+      if (!sent.ok) throw new Error(`kapso_${sent.error}${sent.status ? `_${sent.status}` : ''}`);
+      return sent.wamid;
     }
-    const result = await this.gateway.sendWhatsappMessage(
-      payload as unknown as WhatsappMessagePayload,
-    );
-    return result.externalMessageId;
+
+    const message = payload as unknown as WhatsappMessagePayload;
+    const phone = await this.customerPhone(message.customerId);
+    if (message.imageUrl === undefined) {
+      const sent = await this.kapso.sendText(phone, message.text ?? '');
+      if (!sent.ok) throw new Error(`kapso_${sent.error}${sent.status ? `_${sent.status}` : ''}`);
+      return sent.wamid;
+    }
+
+    const image = await this.loadImage(message.imageUrl);
+    const uploaded = await this.kapso.uploadImage(image.bytes, image.mimeType);
+    if (!uploaded.ok) throw new Error(`kapso_upload_${uploaded.error}`);
+    const sent = await this.kapso.sendImageByMediaId(phone, uploaded.mediaId, message.text);
+    if (!sent.ok) throw new Error(`kapso_${sent.error}${sent.status ? `_${sent.status}` : ''}`);
+    return sent.wamid;
+  }
+
+  private async customerPhone(customerId: string): Promise<string> {
+    const customer = await this.db
+      .selectFrom('customers')
+      .select('phone')
+      .where('id', '=', customerId)
+      .executeTakeFirst();
+    const phone = customer?.phone?.trim();
+    if (!phone) throw new Error('customer_phone_unavailable');
+    return phone;
+  }
+
+  /** Único tipo de imagen interna que se manda por WhatsApp hoy: el QR del banco (`/orders/:id/qr-image`). */
+  private async loadImage(imageUrl: string): Promise<{ bytes: Buffer; mimeType: string }> {
+    const match = /^\/orders\/([0-9a-f-]{36})\/qr-image$/i.exec(imageUrl);
+    if (!match) throw new Error('unsupported_image_url');
+    const charge = await this.db
+      .selectFrom('bank_qr_charges')
+      .select('qr_image_base64')
+      .where('order_id', '=', match[1])
+      .orderBy('created_at', 'desc')
+      .executeTakeFirst();
+    if (!charge) throw new Error('image_not_found');
+    return { bytes: Buffer.from(charge.qr_image_base64, 'base64'), mimeType: 'image/png' };
   }
 }

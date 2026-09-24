@@ -32,7 +32,12 @@ describeIfDb('PaymentAttemptsService.decide (integración, concurrencia)', () =>
 
   beforeAll(async () => {
     db = createTestDb();
-    service = new PaymentAttemptsService(db, noopNotifications, new CashRegisterService(db));
+    service = new PaymentAttemptsService(
+      db,
+      noopNotifications,
+      new CashRegisterService(db),
+      { tryNotify: async () => 'not_applicable' } as never,
+    );
 
     const existingOpen = await db
       .selectFrom('cash_register_sessions')

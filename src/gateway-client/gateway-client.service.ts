@@ -16,6 +16,8 @@ export interface WhatsappLocationRequestPayload {
 export interface TelegramAlertPayload {
   chatRef: string;
   text: string;
+  /** 'HTML' = el texto lleva etiquetas de Telegram (ya escapadas por quien lo arma). */
+  parseMode?: 'HTML';
   /** Si se pasa, el gateway edita el mensaje ya enviado en vez de crear uno nuevo. */
   editMessageId?: string;
   buttons?: Array<{ label: string; action: string }>;

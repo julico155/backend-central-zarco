@@ -30,6 +30,7 @@ import { AttachLocationDto } from './dto/attach-location.dto';
 import { KitchenNoteDto } from './dto/kitchen-note.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { SetSplitPaymentDto } from './dto/set-split-payment.dto';
+import { SetDeliveryFeePaidDto } from './dto/set-delivery-fee-paid.dto';
 
 @Controller()
 export class OrdersController {
@@ -132,6 +133,14 @@ export class OrdersController {
   @Roles('admin', 'cashier', 'kitchen')
   confirmCash(@Param('id', ParseUUIDPipe) id: string) {
     return this.orders.confirmCash(id);
+  }
+
+  // Override humano del cobro de envío del aviso a motos (triestado: sin llamar = nadie decidió).
+  @Patch('orders/:id/delivery-fee-paid')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'cashier', 'kitchen')
+  setDeliveryFeePaid(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetDeliveryFeePaidDto) {
+    return this.orders.setDeliveryFeePaid(id, dto.paid);
   }
 
   @Post('orders/:id/cash/cancel')

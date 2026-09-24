@@ -9,6 +9,7 @@ import {
 } from '../common/exceptions/domain-exception';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
+import { DeliveryNoticeService } from '../delivery-notice/delivery-notice.service';
 
 export interface PaymentAttemptResponse {
   id: string;
@@ -38,6 +39,7 @@ export class PaymentAttemptsService {
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly notifications: NotificationsOutService,
     private readonly cashRegister: CashRegisterService,
+    private readonly deliveryNotice: DeliveryNoticeService,
   ) {}
 
   async findByOrder(orderId: string): Promise<PaymentAttemptResponse[]> {
@@ -95,6 +97,7 @@ export class PaymentAttemptsService {
 
     if (result.won) {
       this.notifyCustomerBestEffort(attemptId, result.customerId, decision);
+      if (decision === 'accepted') await this.deliveryNotice.tryNotify(result.attempt.orderId);
     }
     return { attempt: result.attempt, won: result.won };
   }
@@ -169,6 +172,7 @@ export class PaymentAttemptsService {
     });
 
     this.notifyCustomerBestEffort(result.attempt.id, result.customerId, decision);
+    if (decision === 'accepted') await this.deliveryNotice.tryNotify(orderId);
     return { attempt: result.attempt, won: result.won };
   }
 

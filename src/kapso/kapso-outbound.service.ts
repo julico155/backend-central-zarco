@@ -18,6 +18,7 @@ export type KapsoOutboundError =
   | 'invalid_phone'
   | 'invalid_text'
   | 'invalid_url'
+  | 'invalid_media'
   | 'not_configured'
   | 'http_error'
   | 'invalid_response'
@@ -27,7 +28,15 @@ export type KapsoOutboundError =
 export type KapsoOutboundResult =
   { ok: true; wamid: string } | { ok: false; error: KapsoOutboundError; status?: number };
 
+export type KapsoMediaUploadResult =
+  { ok: true; mediaId: string } | { ok: false; error: KapsoOutboundError; status?: number };
+
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** Copy canónico de la petición de ubicación (idéntico al de sarcoRestaurant). */
+export const LOCATION_REQUEST_BODY_TEXT =
+  'Por favor comparte tu ubicación actual para coordinar el delivery.';
+export const LOCATION_HOW_TO_TEXT = 'Toca el clip 📎 → Ubicación → ENVIAR UBICACIÓN ACTUAL';
 
 function normalizePhone(value: string): string {
   return value.replace(/\D+/g, '');
@@ -81,6 +90,100 @@ export class KapsoOutboundService {
       to,
       type: 'text',
       text: { body: text },
+    });
+  }
+
+  /**
+   * Petición de ubicación: TEXTO plano con las instrucciones dentro (el botón
+   * `location_request_message` se quitó en sarcoRestaurant porque atascaba el
+   * último paso del flujo). Devuelve el wamid.
+   */
+  async sendLocationRequest(
+    customerPhone: string,
+    phoneNumberId?: string | null,
+  ): Promise<KapsoOutboundResult> {
+    return this.sendText(
+      customerPhone,
+      `${LOCATION_REQUEST_BODY_TEXT}
+
+${LOCATION_HOW_TO_TEXT}`,
+      phoneNumberId,
+    );
+  }
+
+  /** Sube una imagen privada a la Media API (nunca viaja como URL pública). */
+  async uploadImage(
+    bytes: Buffer,
+    contentType: string,
+    phoneNumberId?: string | null,
+  ): Promise<KapsoMediaUploadResult> {
+    if (bytes.byteLength === 0 || (contentType !== 'image/png' && contentType !== 'image/jpeg')) {
+      return { ok: false, error: 'invalid_media' };
+    }
+    const kapso = this.config.get('kapso', { infer: true });
+    const targetPhoneNumberId = phoneNumberId || kapso.phoneNumberId;
+    if (!kapso.apiKey || !targetPhoneNumberId) return { ok: false, error: 'not_configured' };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    try {
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', 'image');
+      const blobBytes = new Uint8Array(bytes.byteLength);
+      blobBytes.set(bytes);
+      form.append(
+        'file',
+        new Blob([blobBytes], { type: contentType }),
+        contentType === 'image/png' ? 'image.png' : 'image.jpg',
+      );
+
+      const res = await fetch(`${kapso.apiBaseUrl}/${targetPhoneNumberId}/media`, {
+        method: 'POST',
+        headers: { 'X-API-Key': kapso.apiKey },
+        body: form,
+        signal: controller.signal,
+      });
+      if (!res.ok) return { ok: false, error: 'http_error', status: res.status };
+
+      let json: unknown;
+      try {
+        json = await res.json();
+      } catch {
+        return { ok: false, error: 'invalid_response' };
+      }
+      const id = record(json)?.id;
+      if (typeof id !== 'string' || id.trim() === '')
+        return { ok: false, error: 'invalid_response' };
+      return { ok: true, mediaId: id };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return { ok: false, error: 'timeout' };
+      }
+      return { ok: false, error: 'network_error' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Imagen ya subida (media id), con pie opcional. Devuelve el wamid. */
+  async sendImageByMediaId(
+    customerPhone: string,
+    mediaId: string,
+    caption?: string,
+    phoneNumberId?: string | null,
+  ): Promise<KapsoOutboundResult> {
+    const to = normalizePhone(customerPhone);
+    if (!to) return { ok: false, error: 'invalid_phone' };
+    if (mediaId.trim() === '') return { ok: false, error: 'invalid_media' };
+    const hasCaption = typeof caption === 'string' && caption.trim() !== '';
+
+    return this.postMessage(phoneNumberId ?? null, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'image',
+      image: { id: mediaId.trim(), ...(hasCaption ? { caption } : {}) },
     });
   }
 

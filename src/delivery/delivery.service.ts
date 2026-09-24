@@ -8,6 +8,7 @@ import {
   ValidationError,
 } from '../common/exceptions/domain-exception';
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
+import { DeliveryNoticeService } from '../delivery-notice/delivery-notice.service';
 import { DeliveryTariffService } from './delivery-tariff.service';
 import { DISTANCE_SERVICE, DistanceService } from './distance/distance.service';
 import { QuoteDeliveryDto } from './dto/quote-delivery.dto';
@@ -45,6 +46,7 @@ export class DeliveryService {
     private readonly tariff: DeliveryTariffService,
     @Inject(DISTANCE_SERVICE) private readonly distance: DistanceService,
     private readonly operationalSettings: OperationalSettingsService,
+    private readonly deliveryNotice: DeliveryNoticeService,
   ) {}
 
   /** POST /delivery/quotes — standalone, sin pedido asociado todavía. */
@@ -115,6 +117,14 @@ export class DeliveryService {
    * excede el techo automático.
    */
   async quoteForOrder(orderId: string): Promise<OrderQuoteResponse> {
+    const result = await this.applyQuoteForOrder(orderId);
+    // Cotización cerrada DESPUÉS del pago (efectivo/QR ya confirmado): es el último
+    // requisito del aviso al grupo de motos. Idempotente y nunca lanza.
+    if (result.result === 'applied') await this.deliveryNotice.tryNotify(orderId);
+    return result;
+  }
+
+  private async applyQuoteForOrder(orderId: string): Promise<OrderQuoteResponse> {
     return this.db.transaction().execute(async (trx) => {
       const order = await trx
         .selectFrom('orders')
@@ -238,6 +248,12 @@ export class DeliveryService {
       throw new ValidationError('El monto admite como mucho 2 decimales.');
     }
 
+    const result = await this.applyManualQuote(orderId, amount);
+    if (result.result === 'applied') await this.deliveryNotice.tryNotify(orderId);
+    return result;
+  }
+
+  private async applyManualQuote(orderId: string, amount: number): Promise<OrderQuoteResponse> {
     return this.db.transaction().execute(async (trx) => {
       const order = await trx
         .selectFrom('orders')

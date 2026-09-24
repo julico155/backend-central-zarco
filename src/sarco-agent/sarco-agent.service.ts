@@ -26,6 +26,7 @@ import { createAnswerDirectlyAction } from './tools/answer-directly';
 import { createRequestHumanAction } from './tools/request-human';
 import type { AgentTool } from './tools/registry';
 import { createHandoffPort, createSilenceAfterSpokenHandoff } from './handoff/handoff.service';
+import { HandoffNoticeService } from './handoff/handoff-notice.service';
 import { isExplicitMenuRequest } from './business/menu-request';
 import { DON_ZARCO_MAX_OUTPUT_TOKENS, systemPromptForMode } from './business/prompt';
 import { isPaymentMethodAllowed } from '../orders/order-channel';
@@ -65,6 +66,7 @@ export class SarcoAgentService {
     private readonly menuCatalog: MenuCatalogAdapter,
     private readonly menuDispatch: MenuDispatchService,
     private readonly paymentProofCapture: PaymentProofCaptureService,
+    private readonly handoffNotice?: HandoffNoticeService,
   ) {}
 
   private readAgentEnv() {
@@ -108,7 +110,7 @@ export class SarcoAgentService {
       createAnswerDirectlyAction(),
       // Última del catálogo, como en sarcoRestaurant: es lo que se elige
       // cuando ninguna de las otras sirve.
-      createRequestHumanAction(createHandoffPort(this.repository)),
+      createRequestHumanAction(createHandoffPort(this.repository, this.handoffNotice?.notify)),
     ];
   }
 
@@ -163,7 +165,10 @@ export class SarcoAgentService {
         maxOutputTokens: DON_ZARCO_MAX_OUTPUT_TOKENS,
         actions: this.actions(),
         media: this.mediaResolver,
-        silenceAfterReply: createSilenceAfterSpokenHandoff(this.repository),
+        silenceAfterReply: createSilenceAfterSpokenHandoff(
+          this.repository,
+          this.handoffNotice?.notify,
+        ),
       },
       burst,
     );
