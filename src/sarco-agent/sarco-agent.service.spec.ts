@@ -94,6 +94,7 @@ describe('SarcoAgentService.handleInboundBatch', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     await service.handleInboundBatch([
@@ -109,6 +110,7 @@ describe('SarcoAgentService.handleInboundBatch', () => {
     const service = new SarcoAgentService(
       fakeConfig(),
       repository as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -131,6 +133,7 @@ describe('SarcoAgentService.handleInboundBatch', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     await service.handleInboundBatch([baseEvent({ contentType: 'text', text: 'hola' })]);
@@ -147,6 +150,7 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
     const service = new SarcoAgentService(
       fakeConfig(),
       repository as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -174,6 +178,7 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const payload = {
@@ -194,6 +199,7 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     for (const eventName of [
@@ -206,5 +212,49 @@ describe('SarcoAgentService.handleOutboundEvent', () => {
 
     expect(repository.pauseConversation).not.toHaveBeenCalled();
     expect(repository.upsertConversation).not.toHaveBeenCalled();
+  });
+});
+
+describe('SarcoAgentService — send_menu queda conectado de verdad (Fase 2C)', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('un turno elegible que elige send_menu llama a MenuDispatchService.dispatch', async () => {
+    const repository = fakeRepository();
+    repository.conversations.set('59170000000', { id: 'conv-1', state: 'active' });
+    repository.claimRun.mockResolvedValue({ result: 'claimed', runId: 'run-1' });
+    const menuDispatch = { dispatch: jest.fn().mockResolvedValue({ result: 'sent' }) };
+
+    // El modelo (OpenAI) real se construye dentro del servicio con fetch
+    // global — se simula UNA respuesta de la ronda de selección eligiendo
+    // `send_menu`. Como esa acción cierra el turno en silencio
+    // (`effectCompletesTurn`), no hace falta una segunda respuesta.
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        model: 'gpt-4o-mini',
+        output: [{ type: 'function_call', call_id: 'call-1', name: 'send_menu', arguments: '{}' }],
+      }),
+    }) as never;
+
+    const service = new SarcoAgentService(
+      fakeConfig({ enabled: 'true', apiKey: 'sk-test', accessMode: 'all' }),
+      repository as never,
+      { sendText: jest.fn() } as never,
+      {} as never,
+      { listForModel: jest.fn().mockResolvedValue([]) } as never,
+      menuDispatch as never,
+    );
+
+    await service.handleInboundBatch([
+      baseEvent({ messageId: 'wamid.1', customerPhone: '59170000000', text: 'qué tienen?' }),
+    ]);
+
+    expect(menuDispatch.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ customerPhone: '59170000000', sourceMessageId: 'wamid.1' }),
+    );
   });
 });

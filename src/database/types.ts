@@ -510,6 +510,36 @@ export interface AgentControlEventsTable {
   created_at: Timestamp;
 }
 
+export interface MenuSessionsTable {
+  id: Generated<string>;
+  source_message_id: string;
+  token_hash: string;
+  customer_phone: string;
+  phone_number_id: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  replaces_order_id: string | null;
+}
+
+export type MenuSendDeliveryReason =
+  'explicit_request' | 'explicit_resend' | 'agent_suggestion' | 'qa_trigger';
+export type MenuSendDeliveryStatus =
+  'pending' | 'sent' | 'failed' | 'send_unknown' | 'blocked_recent';
+
+export interface MenuSendDeliveriesTable {
+  id: Generated<string>;
+  customer_phone: string;
+  source_message_id: string;
+  reason: MenuSendDeliveryReason;
+  status: Generated<MenuSendDeliveryStatus>;
+  provider_message_id: string | null;
+  error_code: string | null;
+  claimed_at: Timestamp;
+  completed_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface Database {
   categories: CategoriesTable;
   products: ProductsTable;
@@ -536,4 +566,6 @@ export interface Database {
   agent_messages: AgentMessagesTable;
   agent_runs: AgentRunsTable;
   agent_control_events: AgentControlEventsTable;
+  menu_sessions: MenuSessionsTable;
+  menu_send_deliveries: MenuSendDeliveriesTable;
 }

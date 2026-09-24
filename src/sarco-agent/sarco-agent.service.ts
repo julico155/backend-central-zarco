@@ -21,30 +21,36 @@ import type {
 import { classifyOutboundProvenance, toAgentInboundMessage } from './kapso-message';
 import { KapsoAgentMediaResolver } from './kapso-media-resolver.adapter';
 import { MenuCatalogAdapter } from './menu-catalog.adapter';
-import { createGetMenuItemsTool } from './tools/menu-tools';
+import { createGetMenuItemsTool, createSendMenuTool } from './tools/menu-tools';
 import { createAnswerDirectlyAction } from './tools/answer-directly';
 import { createRequestHumanAction } from './tools/request-human';
 import type { AgentTool } from './tools/registry';
 import { createHandoffPort, createSilenceAfterSpokenHandoff } from './handoff/handoff.service';
+import { isExplicitMenuRequest } from './business/menu-request';
 import { DON_ZARCO_MAX_OUTPUT_TOKENS, systemPromptForMode } from './business/prompt';
+import { isPaymentMethodAllowed } from '../orders/order-channel';
+import { MenuDispatchService } from '../sarco-menu/menu-dispatch.service';
 
 const logger = new Logger('SarcoAgentService');
 
 /**
- * Cableado real del Agent Core dentro de Backend Central (Fase 2B).
+ * Cableado real del Agent Core dentro de Backend Central (Fases 2B y 2C).
  * Equivalente de `createAgentChannel()` en sarcoRestaurant
  * (src/lib/agent/service.ts), pero como servicio Nest inyectable: reúne el
  * store (Kysely), el modelo (OpenAI), el envío (Kapso) y el catálogo de
  * acciones, y expone los dos puntos de entrada que necesita el dispatcher
  * del webhook — `handleInboundBatch` y `handleOutboundEvent`.
  *
- * Simplificaciones deliberadas de esta fase (documentadas, no silenciosas):
- *  - `systemPromptForMode` se llama siempre con `{cashAllowed: true}`: el
- *    modo promoción/saturación (`readCurrentPromoMode`/`readOrdersPaused` en
- *    sarcoRestaurant) no está portado todavía.
- *  - `send_menu` no está en el catálogo de acciones: depende de
- *    `menu_sessions` (2C). Solo `get_menu_items`, `answer_directly` y
- *    `request_human` están conectadas.
+ * Simplificaciones deliberadas que siguen pendientes (documentadas, no
+ * silenciosas):
+ *  - `systemPromptForMode` ya NO hardcodea `cashAllowed` (ver `readCashAllowed`,
+ *    Fase 2C ítem 6): se deriva de la regla real de Central
+ *    (`assertPaymentMethodAllowed('whatsapp','cash')`). Lo que sigue sin
+ *    portarse es `ordersPaused` (saturación) — sarcoRestaurant no tiene un
+ *    equivalente ya migrado en Central (`delivery_settings.orders_paused`).
+ *  - `OpenOrderPort` (rearmar un pedido reemplazable) sigue sin implementar:
+ *    `send_menu` siempre manda el enlace en blanco, igual que sarcoRestaurant
+ *    antes del 05-09-2026 cuando ese puerto no estaba cableado.
  *  - El aviso al equipo tras un handoff es un log, no Telegram (excluido
  *    explícitamente de esta fase).
  */
@@ -56,6 +62,7 @@ export class SarcoAgentService {
     private readonly kapsoOutbound: KapsoOutboundService,
     private readonly mediaResolver: KapsoAgentMediaResolver,
     private readonly menuCatalog: MenuCatalogAdapter,
+    private readonly menuDispatch: MenuDispatchService,
   ) {}
 
   private readAgentEnv() {
@@ -94,12 +101,26 @@ export class SarcoAgentService {
 
   private actions(): AgentTool[] {
     return [
+      createSendMenuTool(this.menuDispatch, undefined, isExplicitMenuRequest),
       createGetMenuItemsTool(this.menuCatalog),
       createAnswerDirectlyAction(),
       // Última del catálogo, como en sarcoRestaurant: es lo que se elige
       // cuando ninguna de las otras sirve.
       createRequestHumanAction(createHandoffPort(this.repository)),
     ];
+  }
+
+  /**
+   * ¿Se puede pagar en efectivo? Fase 2C, ítem 6: ya NO es un booleano
+   * hardcodeado. Se deriva de la regla real que Central ya aplica al crear
+   * un pedido (`assertPaymentMethodAllowed`, `orders/order-channel.ts`):
+   * canal `whatsapp` — que es SIEMPRE el canal de estos pedidos, los cree el
+   * agente o el menú web — solo admite `payment_method: 'qr'`. No hace falta
+   * mirar promociones ni ningún otro estado: la restricción es del canal, no
+   * de la temporada.
+   */
+  private readCashAllowed(): boolean {
+    return isPaymentMethodAllowed('whatsapp', 'cash');
   }
 
   /**
@@ -136,7 +157,7 @@ export class SarcoAgentService {
         }),
         send: this.sendPort(),
         config: this.eligibilityConfig(),
-        systemPrompt: systemPromptForMode({ cashAllowed: true }),
+        systemPrompt: systemPromptForMode({ cashAllowed: this.readCashAllowed() }),
         maxOutputTokens: DON_ZARCO_MAX_OUTPUT_TOKENS,
         actions: this.actions(),
         media: this.mediaResolver,

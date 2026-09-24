@@ -68,6 +68,14 @@ export interface AppConfig {
    * (parseAccessMode/parseTestPhones), igual que en sarcoRestaurant. Así un
    * valor mal escrito no puede abrir el agente por accidente.
    */
+  menu: {
+    /** HMAC del token de sesión del menú (mismo esquema que sarcoRestaurant: sha256 base64url). Vacío = el menú web no puede validar ninguna sesión. */
+    sessionSecret: string;
+    /** Origen del menú web (Next.js), SIN barra final. El CTA arma `${webBaseUrl}/menu?session=<token>`. */
+    webBaseUrl: string;
+    /** Imagen de portada del CTA "Ver menú" (header del mensaje interactive cta_url). */
+    coverImageUrl: string;
+  };
   agent: {
     /** Solo la cadena exacta 'true' enciende el agente. */
     enabled: string;
@@ -168,6 +176,11 @@ export default (): AppConfig => ({
     Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0
       ? Number(process.env.UNPAID_ORDER_TTL_MINUTES)
       : 10,
+  menu: {
+    sessionSecret: process.env.MENU_SESSION_SECRET ?? '',
+    webBaseUrl: (process.env.MENU_WEB_BASE_URL ?? '').replace(/\/+$/, ''),
+    coverImageUrl: process.env.MENU_COVER_IMAGE_URL ?? '',
+  },
   agent: {
     enabled: process.env.AI_ENABLED ?? '',
     accessMode: process.env.AI_ACCESS_MODE ?? '',

@@ -5,7 +5,8 @@ import { AppConfig } from '../config/configuration';
 /**
  * Transporte SALIENTE hacia la API de Kapso. Puerto directo de
  * sarcoRestaurant (src/lib/kapso/transport.ts + client.ts), reducido a lo
- * que el agente necesita para quedar funcional en esta fase: texto plano.
+ * que el agente y el menú web necesitan para quedar funcionales en esta
+ * fase: texto plano y el CTA interactivo "Ver menú".
  *
  * `POST {apiBaseUrl}/{phone_number_id}/messages`, header `X-API-Key`. NO usa
  * el gateway HTTP antiguo de sarcoRestaurant ni ningún endpoint del propio
@@ -16,6 +17,7 @@ import { AppConfig } from '../config/configuration';
 export type KapsoOutboundError =
   | 'invalid_phone'
   | 'invalid_text'
+  | 'invalid_url'
   | 'not_configured'
   | 'http_error'
   | 'invalid_response'
@@ -47,6 +49,18 @@ function extractWamid(json: unknown): string | null {
   return typeof id === 'string' && id.trim() !== '' ? id : null;
 }
 
+export interface SendMenuCtaUrlInput {
+  customerPhone: string;
+  phoneNumberId?: string | null;
+  /** URL de la sesión del menú, entera. */
+  menuUrl: string;
+  /** Imagen de portada del header del CTA. */
+  coverImageUrl: string;
+  bodyText: string;
+  /** Etiqueta del botón (WhatsApp la limita a 20 caracteres). */
+  buttonText: string;
+}
+
 @Injectable()
 export class KapsoOutboundService {
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
@@ -61,6 +75,49 @@ export class KapsoOutboundService {
     if (!to) return { ok: false, error: 'invalid_phone' };
     if (text.trim() === '') return { ok: false, error: 'invalid_text' };
 
+    return this.postMessage(phoneNumberId ?? null, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'text',
+      text: { body: text },
+    });
+  }
+
+  /**
+   * Mensaje interactivo `cta_url` con el botón "Ver menú" (o "MODIFICAR MI
+   * PEDIDO", etc. — el texto lo decide quien llama). Mismo payload que
+   * `buildMenuCtaPayload` en sarcoRestaurant.
+   */
+  async sendMenuCtaUrl(input: SendMenuCtaUrlInput): Promise<KapsoOutboundResult> {
+    const to = normalizePhone(input.customerPhone);
+    if (!to) return { ok: false, error: 'invalid_phone' };
+    if (input.bodyText.trim() === '') return { ok: false, error: 'invalid_text' };
+    if (input.menuUrl.trim() === '' || input.coverImageUrl.trim() === '') {
+      return { ok: false, error: 'invalid_url' };
+    }
+
+    return this.postMessage(input.phoneNumberId ?? null, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        header: { type: 'image', image: { link: input.coverImageUrl } },
+        body: { text: input.bodyText },
+        action: {
+          name: 'cta_url',
+          parameters: { display_text: input.buttonText, url: input.menuUrl },
+        },
+      },
+    });
+  }
+
+  private async postMessage(
+    phoneNumberId: string | null,
+    payload: Record<string, unknown>,
+  ): Promise<KapsoOutboundResult> {
     const kapso = this.config.get('kapso', { infer: true });
     if (!kapso.apiKey) return { ok: false, error: 'not_configured' };
     const targetPhoneNumberId = phoneNumberId || kapso.phoneNumberId;
@@ -76,13 +133,7 @@ export class KapsoOutboundService {
           'content-type': 'application/json',
           'X-API-Key': kapso.apiKey,
         },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to,
-          type: 'text',
-          text: { body: text },
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 

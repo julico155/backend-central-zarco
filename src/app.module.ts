@@ -23,6 +23,7 @@ import { DeliveryDriversModule } from './delivery-drivers/delivery-drivers.modul
 import { WebhookInboxModule } from './webhook-inbox/webhook-inbox.module';
 import { KapsoModule } from './kapso/kapso.module';
 import { SarcoAgentModule } from './sarco-agent/sarco-agent.module';
+import { SarcoMenuModule } from './sarco-menu/sarco-menu.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { SarcoAgentModule } from './sarco-agent/sarco-agent.module';
     WebhookInboxModule,
     KapsoModule,
     SarcoAgentModule,
+    SarcoMenuModule,
   ],
 })
 export class AppModule {}

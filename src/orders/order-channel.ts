@@ -34,10 +34,28 @@ export function assertPaymentMethodAllowed(
   }
 }
 
+/** Versión no-throw de `assertPaymentMethodAllowed`, para decidir qué mostrar antes de intentar crear el pedido. */
+export function isPaymentMethodAllowed(
+  channel: OrderChannel,
+  paymentMethod: OrderPaymentMethod,
+): boolean {
+  try {
+    assertPaymentMethodAllowed(channel, paymentMethod);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** api_client del gateway de WhatsApp — mismo valor que `CHANNEL_BY_API_CLIENT['whatsapp-gateway']`. */
+export const WHATSAPP_API_CLIENT = 'whatsapp-gateway';
+
 export function resolveOrderChannel(apiClient: string, declared?: OrderChannel): OrderChannel {
   const channel = CHANNEL_BY_API_CLIENT[apiClient];
   if (!channel) {
-    throw new ValidationError(`El cliente de servicio "${apiClient}" no tiene un canal de pedidos asignado.`);
+    throw new ValidationError(
+      `El cliente de servicio "${apiClient}" no tiene un canal de pedidos asignado.`,
+    );
   }
   if (declared !== undefined && declared !== channel) {
     throw new DomainException(

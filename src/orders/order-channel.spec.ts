@@ -1,5 +1,9 @@
 import { DomainException, ValidationError } from '../common/exceptions/domain-exception';
-import { assertPaymentMethodAllowed, resolveOrderChannel } from './order-channel';
+import {
+  assertPaymentMethodAllowed,
+  isPaymentMethodAllowed,
+  resolveOrderChannel,
+} from './order-channel';
 
 describe('assertPaymentMethodAllowed', () => {
   it('WhatsApp solo acepta QR', () => {
@@ -19,6 +23,14 @@ describe('assertPaymentMethodAllowed', () => {
     for (const method of ['qr', 'cash', 'split'] as const) {
       expect(() => assertPaymentMethodAllowed('pos', method)).not.toThrow();
     }
+  });
+});
+
+describe('isPaymentMethodAllowed (versión no-throw, usada por sarco-agent/sarco-menu para derivar cashAllowed)', () => {
+  it('nunca hardcodea: refleja exactamente lo que decide assertPaymentMethodAllowed', () => {
+    expect(isPaymentMethodAllowed('whatsapp', 'qr')).toBe(true);
+    expect(isPaymentMethodAllowed('whatsapp', 'cash')).toBe(false);
+    expect(isPaymentMethodAllowed('pos', 'cash')).toBe(true);
   });
 });
 
