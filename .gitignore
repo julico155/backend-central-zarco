@@ -15,3 +15,4 @@ postman/baneco-certificacion/
 
 # Reporte de introspección de la DB Agente (metadatos; no se versiona)
 agent-schema-report*.txt
+central-schema-report*.txt
