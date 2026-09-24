@@ -62,6 +62,26 @@ export interface AppConfig {
   deliveryAcceptRadiusMeters: number;
   /** Radio (m) entre dos pedidos "disponibles" para reportarlos como cercanos entre sí (nunca se expone su lat/lng cruda antes de aceptar). */
   deliveryNearbyRadiusMeters: number;
+  /**
+   * Configuración del agente conversacional, sin interpretar: la forma es
+   * validación (una cadena), el SIGNIFICADO lo decide `sarco-agent/core/eligibility.ts`
+   * (parseAccessMode/parseTestPhones), igual que en sarcoRestaurant. Así un
+   * valor mal escrito no puede abrir el agente por accidente.
+   */
+  agent: {
+    /** Solo la cadena exacta 'true' enciende el agente. */
+    enabled: string;
+    /** Solo 'all' abre el agente a cualquier cliente; cualquier otro valor cae en 'allowlist'. */
+    accessMode: string;
+    /** Teléfonos de prueba separados por coma, sin normalizar todavía. */
+    testPhones: string;
+    apiKey: string;
+    model: string;
+    /** Modelo para turnos con imagen. Vacío = se usa el de texto. */
+    visionModel: string;
+    /** Minutos que se pausa el agente tras un takeover humano desde WhatsApp Business App. */
+    humanTakeoverPauseMinutes: string;
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -105,7 +125,12 @@ export default (): AppConfig => ({
     apiKey: process.env.KAPSO_API_KEY ?? '',
     webhookSecret: process.env.KAPSO_WEBHOOK_SECRET ?? '',
     phoneNumberId: process.env.KAPSO_PHONE_NUMBER_ID ?? '',
-    apiBaseUrl: (process.env.KAPSO_API_BASE_URL ?? 'https://api.kapso.ai').replace(/\/+$/, ''),
+    // URL oficial confirmada por la documentación de Kapso (meta/whatsapp
+    // Cloud API compatible). KAPSO_API_BASE_URL permite sobreescribirla solo
+    // para pruebas locales.
+    apiBaseUrl: (
+      process.env.KAPSO_API_BASE_URL ?? 'https://api.kapso.ai/meta/whatsapp/v24.0'
+    ).replace(/\/+$/, ''),
   },
   webhookAsyncAck: process.env.WEBHOOK_ASYNC_ACK === 'true',
   jwt: {
@@ -143,4 +168,13 @@ export default (): AppConfig => ({
     Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0
       ? Number(process.env.UNPAID_ORDER_TTL_MINUTES)
       : 10,
+  agent: {
+    enabled: process.env.AI_ENABLED ?? '',
+    accessMode: process.env.AI_ACCESS_MODE ?? '',
+    testPhones: process.env.AI_TEST_PHONES ?? process.env.AI_TEST_PHONE ?? '',
+    apiKey: process.env.OPENAI_API_KEY ?? '',
+    model: process.env.OPENAI_MODEL ?? '',
+    visionModel: process.env.AI_VISION_MODEL ?? '',
+    humanTakeoverPauseMinutes: process.env.HUMAN_TAKEOVER_PAUSE_MINUTES ?? '',
+  },
 });

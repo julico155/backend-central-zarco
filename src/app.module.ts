@@ -22,6 +22,7 @@ import { ReportsModule } from './reports/reports.module';
 import { DeliveryDriversModule } from './delivery-drivers/delivery-drivers.module';
 import { WebhookInboxModule } from './webhook-inbox/webhook-inbox.module';
 import { KapsoModule } from './kapso/kapso.module';
+import { SarcoAgentModule } from './sarco-agent/sarco-agent.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { KapsoModule } from './kapso/kapso.module';
     DeliveryDriversModule,
     WebhookInboxModule,
     KapsoModule,
+    SarcoAgentModule,
   ],
 })
 export class AppModule {}

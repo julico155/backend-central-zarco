@@ -213,12 +213,7 @@ export interface PaymentAttemptsTable {
  * API de devolución).
  */
 export type BankQrChargeStatus =
-  | 'pending'
-  | 'confirmed'
-  | 'cancelled'
-  | 'expired'
-  | 'paid_unapplied'
-  | 'refunded';
+  'pending' | 'confirmed' | 'cancelled' | 'expired' | 'paid_unapplied' | 'refunded';
 
 /**
  * QR real de Banco Económico, 1 a 1 con un payment_attempt (el que ya trae
@@ -425,6 +420,96 @@ export interface WebhookEventsTable {
   updated_at: Timestamp;
 }
 
+export type AgentConversationState = 'active' | 'paused';
+export type AgentControlSource = 'business_app' | 'dashboard' | 'api' | 'system';
+
+export interface AgentConversationsTable {
+  id: Generated<string>;
+  customer_phone: string;
+  last_provider_conversation_id: string | null;
+  provider_phone_number_id: string | null;
+  state: Generated<AgentConversationState>;
+  paused_at: Timestamp | null;
+  pause_expires_at: Timestamp | null;
+  pause_reason: string | null;
+  pause_source: AgentControlSource | null;
+  resumed_at: Timestamp | null;
+  first_customer_message_at: Timestamp | null;
+  first_ai_message_at: Timestamp | null;
+  last_message_at: Timestamp | null;
+  last_customer_message_at: Timestamp | null;
+  last_ai_message_at: Timestamp | null;
+  last_human_message_at: Timestamp | null;
+  last_automation_message_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export type AgentMessageDirection = 'inbound' | 'outbound';
+export type AgentMessageRole = 'user' | 'assistant';
+export type AgentMessageActor = 'customer' | 'ai' | 'human' | 'automation';
+export type AgentMessageContentType =
+  | 'text'
+  | 'image'
+  | 'audio'
+  | 'video'
+  | 'document'
+  | 'sticker'
+  | 'location'
+  | 'interactive'
+  | 'unknown';
+
+export interface AgentMessagesTable {
+  id: Generated<string>;
+  agent_conversation_id: string;
+  provider_message_id: string | null;
+  provider_conversation_id: string | null;
+  direction: AgentMessageDirection;
+  role: AgentMessageRole;
+  actor: AgentMessageActor;
+  content: string | null;
+  content_type: Generated<AgentMessageContentType>;
+  metadata: JSONColumnType<Record<string, unknown>> | null;
+  message_timestamp: Timestamp;
+  created_at: Timestamp;
+}
+
+export type AgentRunStatus =
+  'processing' | 'sending' | 'completed' | 'skipped_paused' | 'failed' | 'send_unknown';
+export type AgentRunBarrier = 'pre_openai' | 'pre_send';
+
+export interface AgentRunsTable {
+  id: Generated<string>;
+  agent_conversation_id: string;
+  source_message_id: string;
+  source_agent_message_id: string | null;
+  response_message_id: string | null;
+  status: Generated<AgentRunStatus>;
+  attempt_count: Generated<number>;
+  model: string | null;
+  tool_rounds: Generated<number>;
+  skipped_at_barrier: AgentRunBarrier | null;
+  started_at: Timestamp;
+  completed_at: Timestamp | null;
+  error_code: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export type AgentControlAction = 'pause' | 'resume';
+
+export interface AgentControlEventsTable {
+  id: Generated<string>;
+  agent_conversation_id: string;
+  action: AgentControlAction;
+  source: AgentControlSource;
+  reason: string | null;
+  provider_message_id: string | null;
+  expires_at: Timestamp | null;
+  metadata: JSONColumnType<Record<string, unknown>> | null;
+  created_at: Timestamp;
+}
+
 export interface Database {
   categories: CategoriesTable;
   products: ProductsTable;
@@ -447,4 +532,8 @@ export interface Database {
   dashboard_users: DashboardUsersTable;
   notification_jobs: NotificationJobsTable;
   webhook_events: WebhookEventsTable;
+  agent_conversations: AgentConversationsTable;
+  agent_messages: AgentMessagesTable;
+  agent_runs: AgentRunsTable;
+  agent_control_events: AgentControlEventsTable;
 }
