@@ -12,6 +12,8 @@ export interface AppConfig {
   gateway: {
     baseUrl: string;
     authToken: string;
+    /** Máximo 60 s: debe quedar por debajo del lease de notification_jobs (5 min). */
+    timeoutMs: number;
   };
   jwt: {
     secret: string;
@@ -86,6 +88,10 @@ export default (): AppConfig => ({
   gateway: {
     baseUrl: process.env.GATEWAY_BASE_URL ?? '',
     authToken: process.env.GATEWAY_AUTH_TOKEN ?? '',
+    timeoutMs: Math.min(
+      Number(process.env.GATEWAY_TIMEOUT_MS) > 0 ? Number(process.env.GATEWAY_TIMEOUT_MS) : 30_000,
+      60_000,
+    ),
   },
   jwt: {
     secret: process.env.JWT_SECRET ?? '',
@@ -111,9 +117,15 @@ export default (): AppConfig => ({
   },
   posQrMode: process.env.POS_QR_MODE === 'manual' ? 'manual' : 'bank',
   deliveryAcceptRadiusMeters:
-    Number(process.env.DELIVERY_ACCEPT_RADIUS_METERS) > 0 ? Number(process.env.DELIVERY_ACCEPT_RADIUS_METERS) : 150,
+    Number(process.env.DELIVERY_ACCEPT_RADIUS_METERS) > 0
+      ? Number(process.env.DELIVERY_ACCEPT_RADIUS_METERS)
+      : 150,
   deliveryNearbyRadiusMeters:
-    Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) > 0 ? Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) : 500,
+    Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) > 0
+      ? Number(process.env.DELIVERY_NEARBY_RADIUS_METERS)
+      : 500,
   unpaidOrderTtlMinutes:
-    Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 10,
+    Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0
+      ? Number(process.env.UNPAID_ORDER_TTL_MINUTES)
+      : 10,
 });

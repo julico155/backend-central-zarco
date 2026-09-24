@@ -53,25 +53,40 @@ export class GatewayClientService {
   }
 
   private async post<T = void>(path: string, body: unknown): Promise<T> {
-    const { baseUrl, authToken } = this.config.get('gateway', { infer: true });
-    const response = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const { baseUrl, authToken, timeoutMs } = this.config.get('gateway', { infer: true });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      this.logger.warn(`Gateway call failed: POST ${path} -> ${response.status} ${text}`);
-      throw new Error(`Gateway call failed: POST ${path} -> ${response.status}`);
-    }
+    try {
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch {
+        if (controller.signal.aborted) {
+          throw new Error('Gateway request timed out');
+        }
+        throw new Error('Gateway request failed');
+      }
 
-    if (response.status === 204) {
-      return undefined as T;
+      if (!response.ok) {
+        this.logger.warn(`Gateway call failed: POST ${path} -> ${response.status}`);
+        throw new Error(`Gateway call failed: POST ${path} -> ${response.status}`);
+      }
+
+      if (response.status === 204) {
+        return undefined as T;
+      }
+      return (await response.json()) as T;
+    } finally {
+      clearTimeout(timeout);
     }
-    return (await response.json()) as T;
   }
 }
