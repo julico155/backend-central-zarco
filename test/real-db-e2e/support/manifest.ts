@@ -34,6 +34,11 @@ export interface ManifestData {
   startedAt: string;
   central: Record<CentralTable, string[]>;
   agent: Record<AgentTable, string[]>;
+  /**
+   * Caja REAL que usó el E2E (ALLOW_OPEN_REAL_CASH_REGISTER=true). Solo informativo:
+   * el cleanup NUNCA la borra, la cierra ni restaura su correlativo.
+   */
+  realCashSession?: { id: string; nextOrderNumberBefore: number };
 }
 
 function empty<T extends string>(tables: readonly T[]): Record<T, string[]> {
@@ -72,6 +77,11 @@ export class Manifest {
     for (const t of CENTRAL_TABLES) data.central[t] ??= [];
     for (const t of AGENT_TABLES) data.agent[t] ??= [];
     return new Manifest(path, data);
+  }
+
+  setRealCashSession(session: { id: string; nextOrderNumberBefore: number }): void {
+    this.data.realCashSession = session;
+    this.save();
   }
 
   addCentral(table: CentralTable, ...ids: string[]): void {

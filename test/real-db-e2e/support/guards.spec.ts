@@ -68,6 +68,7 @@ describe('guardas de arranque (readE2EOptions)', () => {
 const cleanCentral: CentralFacts = {
   foreignSessions: [],
   openCashSessions: 0,
+  openCashDetail: [],
   phoneCustomers: 0,
   leftovers: { products: 0, categories: 0, cashSessions: 0 },
   settingsRows: 1,

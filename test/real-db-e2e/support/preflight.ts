@@ -13,6 +13,8 @@ export interface ForeignSession {
 export interface CentralFacts {
   foreignSessions: ForeignSession[];
   openCashSessions: number;
+  /** Detalle de la(s) caja(s) abierta(s): solo el id, el correlativo y si es la más reciente por `opened_at`. */
+  openCashDetail: { id: string; nextOrderNumber: number; isLatestByOpenedAt: boolean }[];
   phoneCustomers: number;
   leftovers: { products: number; categories: number; cashSessions: number };
   settingsRows: number;
@@ -65,6 +67,17 @@ export async function collectCentralFacts(
         )
       ).rows,
     ),
+    openCashDetail: (
+      await client.query(
+        `select id::text as id, next_order_number::int as next_order_number,
+                (id = (select id from cash_register_sessions order by opened_at desc limit 1)) as is_latest
+           from cash_register_sessions where status = 'open'`,
+      )
+    ).rows.map((r) => ({
+      id: String(r.id),
+      nextOrderNumber: Number(r.next_order_number),
+      isLatestByOpenedAt: r.is_latest === true,
+    })),
     phoneCustomers: num(
       (
         await client.query('select count(*)::int as n from customers where phone = $1', [
@@ -144,7 +157,20 @@ const describeSessions = (label: string, sessions: ForeignSession[]): string =>
     )}). Detén el backend/worker que las usa; si son inocuas, decláralas con E2E_IGNORED_APPLICATION_NAMES.`;
 
 /** Puro: decide si el E2E puede escribir. Devuelve TODOS los problemas, no solo el primero. */
-export function evaluatePreflight(central: CentralFacts, agent: AgentFacts): string[] {
+export interface PreflightPolicy {
+  /**
+   * ALLOW_OPEN_REAL_CASH_REGISTER=true: en vez de abortar ante una caja real
+   * abierta, exige EXACTAMENTE una (y que sea la más reciente, porque el
+   * correlativo de pedidos se toma de la última sesión por `opened_at`).
+   */
+  allowOpenRealCashRegister?: boolean;
+}
+
+export function evaluatePreflight(
+  central: CentralFacts,
+  agent: AgentFacts,
+  policy: PreflightPolicy = {},
+): string[] {
   const problems: string[] = [];
 
   if (central.foreignSessions.length > 0)
@@ -152,9 +178,19 @@ export function evaluatePreflight(central: CentralFacts, agent: AgentFacts): str
   if (agent.foreignSessions.length > 0)
     problems.push(describeSessions('DB Agente', agent.foreignSessions));
 
-  if (central.openCashSessions > 0) {
+  if (policy.allowOpenRealCashRegister) {
+    if (central.openCashSessions !== 1) {
+      problems.push(
+        `DB Central: con ALLOW_OPEN_REAL_CASH_REGISTER=true se exige EXACTAMENTE una caja abierta (hay ${central.openCashSessions}).`,
+      );
+    } else if (!central.openCashDetail[0]?.isLatestByOpenedAt) {
+      problems.push(
+        'DB Central: la caja abierta no es la sesión más reciente por opened_at; el correlativo de pedidos avanzaría en OTRA caja.',
+      );
+    }
+  } else if (central.openCashSessions > 0) {
     problems.push(
-      'DB Central: hay una caja REAL abierta. El E2E nunca modifica una caja real: ciérrala antes de correrlo.',
+      'DB Central: hay una caja REAL abierta. El E2E nunca modifica una caja real: ciérrala antes de correrlo (o declara ALLOW_OPEN_REAL_CASH_REGISTER=true).',
     );
   }
   if (central.phoneCustomers > 0)
@@ -185,8 +221,12 @@ export function evaluatePreflight(central: CentralFacts, agent: AgentFacts): str
   return problems;
 }
 
-export function assertPreflight(central: CentralFacts, agent: AgentFacts): void {
-  const problems = evaluatePreflight(central, agent);
+export function assertPreflight(
+  central: CentralFacts,
+  agent: AgentFacts,
+  policy: PreflightPolicy = {},
+): void {
+  const problems = evaluatePreflight(central, agent, policy);
   if (problems.length > 0) {
     throw new E2EGuardError(`preflight falló.\n - ${problems.join('\n - ')}`);
   }
@@ -196,9 +236,20 @@ export function assertPreflight(central: CentralFacts, agent: AgentFacts): void 
 export async function runPreflight(
   central: Queryable,
   agent: Queryable,
-  opts: Pick<E2EOptions, 'phone' | 'ignoredApplicationNames'>,
-): Promise<void> {
-  assertPreflight(await collectCentralFacts(central, opts), await collectAgentFacts(agent, opts));
+  opts: Pick<E2EOptions, 'phone' | 'ignoredApplicationNames'> & PreflightPolicy,
+): Promise<{ realCash: RealCashBaseline | null }> {
+  const centralFacts = await collectCentralFacts(central, opts);
+  assertPreflight(centralFacts, await collectAgentFacts(agent, opts), opts);
+  const open = opts.allowOpenRealCashRegister ? centralFacts.openCashDetail[0] : undefined;
+  return {
+    realCash: open ? { id: open.id, nextOrderNumberBefore: open.nextOrderNumber } : null,
+  };
+}
+
+/** Caja real que el E2E usará (sin modificarla salvo el correlativo). */
+export interface RealCashBaseline {
+  id: string;
+  nextOrderNumberBefore: number;
 }
 
 /** Segunda comprobación, justo antes del primer INSERT. */

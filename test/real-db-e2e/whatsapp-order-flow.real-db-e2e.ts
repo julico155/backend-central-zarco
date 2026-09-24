@@ -10,14 +10,19 @@ import {
   type E2EApp,
   type E2EAppEnv,
 } from './support/app';
-import { AGENT_WRITE_ALLOWLIST, CENTRAL_WRITE_ALLOWLIST, auditWrites } from './support/audit';
+import {
+  AGENT_WRITE_ALLOWLIST,
+  CENTRAL_WRITE_ALLOWLIST,
+  auditWrites,
+  countCounterIncrements,
+} from './support/audit';
 import { cleanupFromManifest } from './support/cleanup';
 import { closeReadOnly, openAgent, openCentral, openReadOnly } from './support/connections';
 import { discoverByIdentity } from './support/discover';
 import { inboundLocation, inboundText } from './support/kapso-payloads';
 import { Manifest } from './support/manifest';
 import { E2E_PREFIX, readE2EOptions, type E2EOptions } from './support/options';
-import { recheckForeignSessions, runPreflight } from './support/preflight';
+import { recheckForeignSessions, runPreflight, type RealCashBaseline } from './support/preflight';
 import { diffSnapshots, takeSnapshot, type Snapshot } from './support/snapshot';
 
 /**
@@ -32,6 +37,16 @@ import { diffSnapshots, takeSnapshot, type Snapshot } from './support/snapshot';
  */
 
 const WAIT_MS = 20_000;
+
+/**
+ * Con ALLOW_OPEN_REAL_CASH_REGISTER=true el pedido E2E usa la caja real abierta y
+ * `assignOrderNumber` (orders.service.ts) hace UN `update … next_order_number + 1`
+ * por cada pedido NUEVO que se crea. Este E2E crea exactamente un pedido: el
+ * reintento idempotente del carrito devuelve la respuesta guardada
+ * (IdempotencyService) sin volver a numerar, y el carrito distinto se rechaza (409)
+ * antes de ejecutar. Por eso el correlativo debe avanzar EXACTAMENTE 1.
+ */
+const EXPECTED_COUNTER_ADVANCE = 1;
 
 async function waitFor<T>(label: string, probe: () => Promise<T | undefined | false>): Promise<T> {
   const deadline = Date.now() + WAIT_MS;
@@ -53,6 +68,7 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
   let beforeCentral: Snapshot | null = null;
   let beforeAgent: Snapshot | null = null;
   let wrote = false;
+  let realCash: RealCashBaseline | null = null;
 
   const ids = {
     productCode: '',
@@ -99,8 +115,8 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
     const roCentral = await openReadOnly(options.centralUrl, 'e2e-preflight');
     const roAgent = await openReadOnly(options.agentUrl, 'e2e-preflight');
     try {
-      await runPreflight(roCentral, roAgent, options);
-      beforeCentral = await takeSnapshot(roCentral);
+      ({ realCash } = await runPreflight(roCentral, roAgent, options));
+      beforeCentral = await takeSnapshot(roCentral, { realCashSessionId: realCash?.id });
       beforeAgent = await takeSnapshot(roAgent);
     } finally {
       await closeReadOnly(roCentral);
@@ -130,12 +146,17 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
     ids.eventLocation = `${E2E_PREFIX}${run}-evt-location`;
     ids.wamidLocation = `${E2E_PREFIX}${run}-wamid-location`;
 
-    const cashSessionId = randomUUID();
-    manifest.addCentral('cash_register_sessions', cashSessionId);
-    await central
-      .insertInto('cash_register_sessions')
-      .values({ id: cashSessionId, opened_by: `${E2E_PREFIX}${run}`, opening_amount: '0' })
-      .execute();
+    if (realCash) {
+      // Caja real: se usa tal cual. No se registra para borrado (el cleanup nunca la toca).
+      manifest.setRealCashSession(realCash);
+    } else {
+      const cashSessionId = randomUUID();
+      manifest.addCentral('cash_register_sessions', cashSessionId);
+      await central
+        .insertInto('cash_register_sessions')
+        .values({ id: cashSessionId, opened_by: `${E2E_PREFIX}${run}`, opening_amount: '0' })
+        .execute();
+    }
 
     const categoryId = randomUUID();
     manifest.addCentral('categories', categoryId);
@@ -190,13 +211,31 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
         const a = await openReadOnly(options.agentUrl, 'e2e-verify');
         try {
           const diffs = [
-            ...diffSnapshots(beforeCentral, await takeSnapshot(c)).map((d) => `central.${d}`),
+            ...diffSnapshots(
+              beforeCentral,
+              await takeSnapshot(c, { realCashSessionId: realCash?.id }),
+            ).map((d) => `central.${d}`),
             ...diffSnapshots(beforeAgent, await takeSnapshot(a)).map((d) => `agent.${d}`),
           ];
           if (diffs.length > 0)
             problems.push(
               `el estado posterior NO coincide con el anterior:\n - ${diffs.join('\n - ')}`,
             );
+          if (realCash) {
+            const { rows } = await c.query(
+              'select next_order_number::int as n, status from cash_register_sessions where id = $1::uuid',
+              [realCash.id],
+            );
+            // Un pedido E2E creado = un número consumido (aunque la corrida haya fallado a mitad).
+            const createdOrders = manifest.ids('central', 'orders').length;
+            const expected =
+              realCash.nextOrderNumberBefore + createdOrders * EXPECTED_COUNTER_ADVANCE;
+            if (rows.length !== 1 || rows[0].status !== 'open' || Number(rows[0].n) !== expected) {
+              problems.push(
+                `la caja real debe seguir abierta con next_order_number=${expected} (antes ${realCash.nextOrderNumberBefore}); estado final: ${JSON.stringify(rows)}`,
+              );
+            }
+          }
         } finally {
           await closeReadOnly(c);
           await closeReadOnly(a);
@@ -647,8 +686,29 @@ describe('E2E real-db: WhatsApp → pedido → ubicación → pago → confirmac
       ...Object.values(manifest.data.agent).flat(),
     ]);
     expect(
-      auditWrites(e2e.centralAudit.writes, CENTRAL_WRITE_ALLOWLIST, allowedRefs, options.phone),
+      auditWrites(
+        e2e.centralAudit.writes,
+        CENTRAL_WRITE_ALLOWLIST,
+        allowedRefs,
+        options.phone,
+        realCash?.id,
+      ),
     ).toEqual([]);
+    if (realCash) {
+      // Solo el correlativo de la caja real avanzó, y exactamente lo que crear UN pedido consume.
+      expect(countCounterIncrements(e2e.centralAudit.writes, realCash.id)).toBe(
+        EXPECTED_COUNTER_ADVANCE,
+      );
+      const session = await central
+        .selectFrom('cash_register_sessions')
+        .select(['status', 'next_order_number'])
+        .where('id', '=', realCash.id)
+        .executeTakeFirstOrThrow();
+      expect(session.status).toBe('open');
+      expect(session.next_order_number).toBe(
+        realCash.nextOrderNumberBefore + EXPECTED_COUNTER_ADVANCE,
+      );
+    }
     expect(
       auditWrites(e2e.agentAudit.writes, AGENT_WRITE_ALLOWLIST, allowedRefs, options.phone),
     ).toEqual([]);

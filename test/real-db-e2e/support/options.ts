@@ -18,6 +18,8 @@ export interface E2EOptions {
   centralUrl: string;
   agentUrl: string;
   manifestPath: string;
+  /** ALLOW_OPEN_REAL_CASH_REGISTER=true: usa la caja real abierta (solo avanza su correlativo). */
+  allowOpenRealCashRegister: boolean;
   /** Application names ajenos que el operador decidió tolerar en pg_stat_activity (lista explícita). */
   ignoredApplicationNames: string[];
 }
@@ -56,6 +58,7 @@ export function readE2EOptions(env: NodeJS.ProcessEnv = process.env): E2EOptions
     centralUrl,
     agentUrl,
     manifestPath: env.E2E_MANIFEST_PATH ?? 'e2e-manifest.json',
+    allowOpenRealCashRegister: env.ALLOW_OPEN_REAL_CASH_REGISTER === 'true',
     ignoredApplicationNames: (env.E2E_IGNORED_APPLICATION_NAMES ?? '')
       .split(',')
       .map((s) => s.trim())

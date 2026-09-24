@@ -57,6 +57,8 @@ export function auditWrites(
   allowedTables: Set<string>,
   allowedRefs: ReadonlySet<string>,
   phone: string,
+  /** Con caja real: id EXACTO de la caja cuyo correlativo puede avanzar (y nada más de ella). */
+  realCashSessionId?: string,
 ): string[] {
   const violations: string[] = [];
   for (const write of writes) {
@@ -64,6 +66,15 @@ export function auditWrites(
     if (!match) continue;
     const verb = match[1].toLowerCase().replace(/\s+/g, ' ');
     const table = match[2].toLowerCase();
+
+    if (realCashSessionId && table === 'cash_register_sessions') {
+      if (!isCounterIncrement(write, realCashSessionId)) {
+        violations.push(
+          `${verb} ${table}: con caja real solo se permite avanzar next_order_number de la caja registrada`,
+        );
+      }
+      continue;
+    }
 
     if (!allowedTables.has(table)) {
       violations.push(`${verb} ${table}: tabla fuera de la lista permitida`);
@@ -78,4 +89,23 @@ export function auditWrites(
       violations.push(`${verb} ${table}: no está acotado a ningún id/teléfono/prefijo del E2E`);
   }
   return violations;
+}
+
+/**
+ * `update "cash_register_sessions" set "next_order_number" = next_order_number + 1 where "id" = $1`,
+ * con ese id y NINGÚN otro parámetro: es la única escritura que el E2E puede hacerle a la caja real.
+ */
+export function isCounterIncrement(write: WriteRecord, sessionId: string): boolean {
+  const sql = write.sql.replace(/\s+/g, ' ').trim().toLowerCase();
+  return (
+    /^update "?cash_register_sessions"? set "?next_order_number"? = next_order_number \+ 1 where "?id"? = \$1( returning "?next_order_number"?)?$/.test(
+      sql,
+    ) &&
+    write.parameters.length === 1 &&
+    write.parameters[0] === sessionId
+  );
+}
+
+export function countCounterIncrements(writes: readonly WriteRecord[], sessionId: string): number {
+  return writes.filter((w) => isCounterIncrement(w, sessionId)).length;
 }
