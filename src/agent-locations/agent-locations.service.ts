@@ -7,16 +7,11 @@ import { Database } from '../database/types';
 import { ValidationError } from '../common/exceptions/domain-exception';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { normalizePhone } from '../customers/normalize-phone';
-import { haversineMeters } from '../delivery/distance/distance.service';
 import type { OrderQuoteResponse } from '../delivery/delivery.service';
 import { OrdersService } from '../orders/orders.service';
-import { SAME_LOCATION_TOLERANCE_METERS } from '../orders/location-attach';
 import { AttachAgentLocationDto } from './dto/attach-agent-location.dto';
 
 export const AGENT_LOCATION_ENDPOINT = 'POST /internal/agent/locations/attach';
-
-/** Pedidos de delivery que ya avanzaron (con ubicación cotizada): otra ubicación distinta es conflicto. */
-const ADVANCED_STATUSES = ['confirmed', 'preparing', 'ready', 'out_for_delivery'] as const;
 
 export interface AgentLocationOrderSummary {
   id: string;
@@ -147,41 +142,10 @@ export class AgentLocationsService {
       };
     }
 
-    // Nada esperando ubicación. Si el cliente tiene pedidos de delivery ya
-    // cotizados en curso, la misma ubicación es un reenvío y una distinta es
-    // conflicto (no se modifica nada). Vencidos y cancelados no cuentan.
-    const advanced: OrderRow[] = await trx
-      .selectFrom('orders')
-      .select([
-        'id',
-        'order_number',
-        'total_amount',
-        'status',
-        'delivery_quote_status',
-        'delivery_latitude',
-        'delivery_longitude',
-      ])
-      .where('customer_id', '=', customer.id)
-      .where('delivery_type', '=', 'delivery')
-      .where('status', 'in', [...ADVANCED_STATUSES])
-      .where('delivery_latitude', 'is not', null)
-      .where('delivery_longitude', 'is not', null)
-      .orderBy('created_at', 'desc')
-      .execute();
-
-    const same = advanced.find(
-      (o) =>
-        haversineMeters(
-          { latitude: o.delivery_latitude as number, longitude: o.delivery_longitude as number },
-          location,
-        ) <= SAME_LOCATION_TOLERANCE_METERS,
-    );
-    if (same) {
-      return { result: 'already_attached', orderId: same.id, orderNumber: same.order_number };
-    }
-    if (advanced.length > 0) {
-      return { result: 'location_conflict', orders: advanced.map(summarize) };
-    }
+    // 0 pedidos esperando ubicación (vigentes) => no_order, sin mirar otros
+    // pedidos del cliente (confirmed, preparing, cotizados…): el agente usa este
+    // resultado para pasar a POST /delivery/quotes cuando alguien manda un pin
+    // solo para consultar cuánto cuesta el delivery.
     return { result: 'no_order' };
   }
 }

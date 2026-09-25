@@ -214,13 +214,25 @@ describeIfDb('Ubicación de pedidos y cotización sin pedido (integración)', ()
       expect(Number(o.total_amount)).toBe(65);
     });
 
-    it('already_attached: misma ubicación otra vez (mensaje distinto, ~5 m) no cambia nada', async () => {
+    it('already_attached: pedido esperando ubicación que ya la tiene y la misma llega otra vez (~2 m) no cambia nada', async () => {
+      const c = await newCustomer();
+      const id = await newOrder(c.id, { quote: 'pending_manual', coords: A });
+      const res = await attach(c.waId, A_NEARBY, 'aa-1');
+      expect(res).toMatchObject({ result: 'already_attached', orderId: id });
+      expect(await readOrder(id)).toMatchObject({ delivery_quote_status: 'pending_manual', delivery_latitude: A.latitude, delivery_longitude: A.longitude });
+    });
+
+    it('no_order: pedido anterior confirmed/quoted y NINGUNO esperando ubicación, misma ubicación o distinta; el anterior no se toca', async () => {
       const c = await newCustomer();
       const id = await newOrder(c.id);
-      await attach(c.waId, A, 'aa-1');
-      const res = await attach(c.waId, A_NEARBY, 'aa-2');
-      expect(res).toMatchObject({ result: 'already_attached', orderId: id });
-      expect(await readOrder(id)).toMatchObject({ delivery_latitude: A.latitude, delivery_longitude: A.longitude });
+      await attach(c.waId, A, 'prev-1'); // queda confirmed / quoted
+      const before = await readOrder(id);
+      expect(before).toMatchObject({ status: 'confirmed', delivery_quote_status: 'quoted' });
+
+      expect(await attach(c.waId, A, 'prev-2')).toEqual({ result: 'no_order' });
+      expect(await attach(c.waId, A_NEARBY, 'prev-3')).toEqual({ result: 'no_order' });
+      expect(await attach(c.waId, B, 'prev-4')).toEqual({ result: 'no_order' });
+      expect(await readOrder(id)).toEqual(before);
     });
 
     it('ubicación distinta antes de cotizar (pending / failed): reemplaza y cotiza', async () => {
@@ -235,18 +247,12 @@ describeIfDb('Ubicación de pedidos y cotización sin pedido (integración)', ()
       expect(await readOrder(failed)).toMatchObject({ delivery_quote_status: 'quoted', delivery_latitude: B.latitude });
     });
 
-    it('location_conflict después de cotizar (o pending_manual): no modifica las coordenadas', async () => {
+    it('location_conflict: pedido esperando ubicación en pending_manual y llega una distinta; no modifica las coordenadas', async () => {
       const c = await newCustomer();
-      const id = await newOrder(c.id);
-      await attach(c.waId, A, 'con-1'); // queda quoted / confirmed
-      const res = await attach(c.waId, B, 'con-2');
+      const pm = await newOrder(c.id, { quote: 'pending_manual', coords: A });
+      const res = await attach(c.waId, B, 'con-1');
       expect(res.result).toBe('location_conflict');
-      expect(await readOrder(id)).toMatchObject({ delivery_quote_status: 'quoted', delivery_latitude: A.latitude, delivery_longitude: A.longitude });
-
-      const c2 = await newCustomer();
-      const pm = await newOrder(c2.id, { quote: 'pending_manual', coords: A });
-      expect((await attach(c2.waId, B, 'con-3')).result).toBe('location_conflict');
-      expect(await readOrder(pm)).toMatchObject({ delivery_quote_status: 'pending_manual', delivery_latitude: A.latitude });
+      expect(await readOrder(pm)).toMatchObject({ delivery_quote_status: 'pending_manual', delivery_latitude: A.latitude, delivery_longitude: A.longitude });
     });
 
     it('dedupe por sourceMessageId: el reintento devuelve la misma respuesta sin volver a ejecutar', async () => {

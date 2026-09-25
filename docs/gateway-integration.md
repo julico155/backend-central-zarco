@@ -131,10 +131,10 @@ responde 200 con `result`:
 | `result` | Cuándo | Extra |
 |---|---|---|
 | `attached` | 1 pedido delivery esperando ubicación (`awaiting_location`, dentro del TTL de 10 min): se guarda y se cotiza | `orderId`, `orderNumber`, `quote` |
-| `already_attached` | la misma ubicación otra vez (tolerancia ~5 m) | `orderId`, `orderNumber` |
-| `location_conflict` | ubicación distinta con el pedido ya cotizado, en `pending_manual` o avanzado: **no se modifica nada** | `orders[]` |
+| `already_attached` | el pedido que espera ubicación ya tiene esa misma ubicación (tolerancia ~5 m) | `orderId`, `orderNumber` |
+| `location_conflict` | el pedido que espera ubicación está en `pending_manual` y llega una ubicación distinta: **no se modifica nada** | `orders[]` |
 | `ambiguous_order` | 2 o más pedidos esperando ubicación: no elige ninguno | `orders[]` (`id`, `orderNumber`, `totalAmount`) |
-| `no_order` | no hay cliente o pedido esperando (vencido/cancelado no cuenta ni se revive) | — |
+| `no_order` | no hay cliente o ningún pedido esperando ubicación y vigente. Vencidos, cancelados y pedidos ya cotizados/en curso **no cuentan** (no se miran): es la señal para pasar a `POST /delivery/quotes` | — |
 
 Una ubicación distinta con el pedido todavía sin cotizar (`pending`/`failed`)
 reemplaza la anterior y cotiza (`attached`). `sourceMessageId` deduplica

@@ -102,7 +102,9 @@ export interface OrdersTable {
   delivery_distance_meters: number | null;
   delivery_latitude: number | null;
   delivery_longitude: number | null;
-  delivery_fee_paid: Generated<boolean>;
+  /** Triestado (migración 1700000035000): null = nadie decidió (sin override), true = "envío pagado", false = "cobrar envío". */
+  delivery_fee_paid: boolean | null;
+  delivery_fee_paid_at: Timestamp | null;
   cash_confirmed_at: Timestamp | null;
   /** Solo con payment_method='split': cuánto de la cuenta va en efectivo. */
   split_cash_amount: string | null;

@@ -215,7 +215,7 @@ simulado:
 - **`agent-locations`** — `POST /internal/agent/locations/attach` (solo
   api_client `whatsapp-gateway`): el agente manda teléfono + coordenadas +
   `sourceMessageId` y Central resuelve el pedido (`attached`,
-  `already_attached`, `location_conflict`, `ambiguous_order`, `no_order`),
+  `already_attached`, `location_conflict`, `ambiguous_order`, `no_order`; sin ningún pedido esperando ubicación siempre es `no_order`),
   todo con el pedido bloqueado en una transacción y sin sobrescribir jamás
   una ubicación ya cotizada (misma regla en `POST /orders/:id/location`).
   Teléfonos normalizados con `normalizePhone` (`+<dígitos>`, sin asumir país).
