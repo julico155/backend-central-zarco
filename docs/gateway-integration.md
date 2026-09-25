@@ -115,6 +115,47 @@ que le pagás al repartidor al recibir."* Si le decís un solo número
 (`totalAmount`) sin aclarar, va a esperar que el QR cubra todo y se va a
 confundir cuando el repartidor le pida el envío en efectivo.
 
+#### Ubicación por teléfono (sin conocer el `orderId`)
+
+```
+POST /internal/agent/locations/attach        // solo token whatsapp-gateway
+{ "customerPhone": "59170001234", "latitude": -17.78, "longitude": -63.18,
+  "sourceMessageId": "wamid..." }
+→ 200 { "result": ..., ... }
+```
+
+Central resuelve cliente (teléfono normalizado a `+<dígitos>`, nunca asume
+país) y pedido; el agente no consulta pedidos ni calcula delivery. Siempre
+responde 200 con `result`:
+
+| `result` | Cuándo | Extra |
+|---|---|---|
+| `attached` | 1 pedido delivery esperando ubicación (`awaiting_location`, dentro del TTL de 10 min): se guarda y se cotiza | `orderId`, `orderNumber`, `quote` |
+| `already_attached` | la misma ubicación otra vez (tolerancia ~5 m) | `orderId`, `orderNumber` |
+| `location_conflict` | ubicación distinta con el pedido ya cotizado, en `pending_manual` o avanzado: **no se modifica nada** | `orders[]` |
+| `ambiguous_order` | 2 o más pedidos esperando ubicación: no elige ninguno | `orders[]` (`id`, `orderNumber`, `totalAmount`) |
+| `no_order` | no hay cliente o pedido esperando (vencido/cancelado no cuenta ni se revive) | — |
+
+Una ubicación distinta con el pedido todavía sin cotizar (`pending`/`failed`)
+reemplaza la anterior y cotiza (`attached`). `sourceMessageId` deduplica
+reintentos: el mismo `wamid` con el mismo cuerpo devuelve la misma respuesta;
+con otro cuerpo, `409 idempotency_key_reused`. `POST /orders/:id/location`
+aplica la misma protección (`409 location_conflict`).
+
+#### Cotizar sin pedido
+
+```
+POST /delivery/quotes        // Idempotency-Key obligatorio
+{ "latitude": -17.78, "longitude": -63.18 }
+→ { "status": "quoted", "distanceMeters": 4200, "feeAmount": 15,
+    "surchargeAmount": 3, "totalAmount": 18 }
+```
+
+`totalAmount` = tarifa + recargo por lluvia vigente (el monto real). No crea
+pedido ni guarda la ubicación para uno futuro: al crear el pedido hay que
+pedir/adjuntar una ubicación nueva. `status: "manual_quote"` = fuera del
+rango automático (montos `null`).
+
 ### 2.5 Pago QR
 
 **Reglas de pago de WhatsApp**: todos los pedidos (delivery, pickup y mesa)

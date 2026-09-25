@@ -212,6 +212,15 @@ simulado:
   paso. Sigue protegido por el mismo índice único
   (`uq_payment_attempts_live`), así que no se puede confirmar dos veces ni
   pisar un intento por foto que haya llegado casi al mismo tiempo.
+- **`agent-locations`** — `POST /internal/agent/locations/attach` (solo
+  api_client `whatsapp-gateway`): el agente manda teléfono + coordenadas +
+  `sourceMessageId` y Central resuelve el pedido (`attached`,
+  `already_attached`, `location_conflict`, `ambiguous_order`, `no_order`),
+  todo con el pedido bloqueado en una transacción y sin sobrescribir jamás
+  una ubicación ya cotizada (misma regla en `POST /orders/:id/location`).
+  Teléfonos normalizados con `normalizePhone` (`+<dígitos>`, sin asumir país).
+  `POST /delivery/quotes` (cotizar sin pedido) suma el recargo por lluvia y
+  devuelve `feeAmount`/`surchargeAmount`/`totalAmount`.
 - **`delivery-drivers`** — pantalla del repartidor (rol `delivery`):
   `GET /delivery/orders/available|mine`, `POST /delivery/orders/:id/accept`
   (solo estando a menos de `DELIVERY_ACCEPT_RADIUS_METERS` del local, con CAS

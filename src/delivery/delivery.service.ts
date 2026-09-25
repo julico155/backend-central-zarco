@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
 import {
@@ -11,12 +11,18 @@ import { OperationalSettingsService } from '../operational-settings/operational-
 import { DeliveryTariffService } from './delivery-tariff.service';
 import { DISTANCE_SERVICE, DistanceService } from './distance/distance.service';
 import { QuoteDeliveryDto } from './dto/quote-delivery.dto';
+import { composeStandaloneQuote } from './standalone-quote';
 
 export interface StandaloneQuoteResponse {
   id: string;
   status: 'quoted' | 'manual_quote' | 'failed';
   distanceMeters: number | null;
+  /** Tarifa de la banda (sin recargo). */
   feeAmount: number | null;
+  /** Recargo por lluvia vigente al cotizar (0 si no hay). null si no hubo tarifa automática. */
+  surchargeAmount: number | null;
+  /** feeAmount + surchargeAmount: el monto final real de delivery. null si no hubo tarifa automática. */
+  totalAmount: number | null;
   errorCode: string | null;
 }
 
@@ -66,8 +72,12 @@ export class DeliveryService {
       longitude: dto.longitude,
     });
     const fee = await this.tariff.feeForMeters(meters);
+    const amounts = composeStandaloneQuote(fee, {
+      enabled: settings.rain_surcharge_enabled,
+      amount: Number(settings.rain_surcharge_amount),
+    });
 
-    const values = fee.ok
+    const values = fee.ok && amounts
       ? {
           idempotency_key: idempotencyKey,
           latitude: dto.latitude,
@@ -75,19 +85,21 @@ export class DeliveryService {
           status: 'quoted' as const,
           distance_meters: meters,
           distance_source: source,
-          fee_amount: fee.amount.toFixed(2),
+          fee_amount: amounts.feeAmount.toFixed(2),
+          surcharge_amount: amounts.surchargeAmount.toFixed(2),
           error_code: null,
         }
       : {
           idempotency_key: idempotencyKey,
           latitude: dto.latitude,
           longitude: dto.longitude,
-          status: (fee.reason === 'manual_quote' ? 'manual_quote' : 'failed') as
+          status: (!fee.ok && fee.reason === 'manual_quote' ? 'manual_quote' : 'failed') as
             'manual_quote' | 'failed',
-          distance_meters: fee.reason === 'manual_quote' ? meters : null,
-          distance_source: fee.reason === 'manual_quote' ? source : null,
+          distance_meters: !fee.ok && fee.reason === 'manual_quote' ? meters : null,
+          distance_source: !fee.ok && fee.reason === 'manual_quote' ? source : null,
           fee_amount: null,
-          error_code: fee.reason,
+          surcharge_amount: null,
+          error_code: fee.ok ? null : fee.reason,
         };
 
     const inserted = await this.db
@@ -115,7 +127,20 @@ export class DeliveryService {
    * excede el techo automático.
    */
   async quoteForOrder(orderId: string): Promise<OrderQuoteResponse> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.db.transaction().execute((trx) => this.quoteForOrderInTransaction(trx, orderId));
+  }
+
+  /**
+   * Mismo cuerpo que `quoteForOrder`, dentro de una transacción ajena: lo usa
+   * `OrdersService.applyLocationLocked` para guardar la ubicación y cotizar de
+   * forma atómica. Otra conexión bloqueando la misma fila (FOR UPDATE) se
+   * quedaría esperando a la del llamador, por eso no abre transacción propia.
+   */
+  async quoteForOrderInTransaction(
+    trx: Transaction<Database>,
+    orderId: string,
+  ): Promise<OrderQuoteResponse> {
+    {
       const order = await trx
         .selectFrom('orders')
         .selectAll()
@@ -221,7 +246,7 @@ export class DeliveryService {
         status: 'confirmed',
         deliveryQuoteStatus: 'quoted',
       };
-    });
+    }
   }
 
   /** POST /orders/:id/delivery/quote/manual — staff fija el monto a mano (solo por encima del techo). */
@@ -344,13 +369,22 @@ function toStandaloneResponse(row: {
   status: string;
   distance_meters: number | null;
   fee_amount: string | null;
+  surcharge_amount: string | null;
   error_code: string | null;
 }): StandaloneQuoteResponse {
+  const feeAmount = row.fee_amount === null ? null : Number(row.fee_amount);
+  // Filas anteriores a la columna: surcharge null = sin recargo.
+  const surchargeAmount = feeAmount === null ? null : Number(row.surcharge_amount ?? 0);
   return {
     id: row.id,
     status: row.status as StandaloneQuoteResponse['status'],
     distanceMeters: row.distance_meters,
-    feeAmount: row.fee_amount === null ? null : Number(row.fee_amount),
+    feeAmount,
+    surchargeAmount,
+    totalAmount:
+      feeAmount === null || surchargeAmount === null
+        ? null
+        : Math.round((feeAmount + surchargeAmount) * 100) / 100,
     errorCode: row.error_code,
   };
 }

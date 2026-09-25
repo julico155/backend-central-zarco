@@ -25,12 +25,13 @@ import {
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { checkoutGateAt, lateRequestExpiryFor } from '../common/time/service-window';
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
-import { DeliveryService } from '../delivery/delivery.service';
+import { DeliveryService, OrderQuoteResponse } from '../delivery/delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
+import { decideLocationAttach, LocationAttachDecision } from './location-attach';
 
 export interface OrderItemResponse {
   productId: string;
@@ -834,33 +835,88 @@ export class OrdersService {
     });
   }
 
-  /** Dispara la cotización de delivery atada al pedido (ver DeliveryService.quoteForOrder). */
+  /**
+   * POST /orders/:id/location. Guarda la ubicación y cotiza en UNA transacción
+   * con el pedido bloqueado. Si el pedido ya fue cotizado (o avanzó) y llega
+   * una ubicación distinta se rechaza con 409 location_conflict SIN tocar las
+   * coordenadas: nunca puede quedar tarifa de la ubicación A con coordenadas
+   * de la B.
+   */
   async attachLocation(
     orderId: string,
     location: { latitude: number; longitude: number },
   ): Promise<OrderResponse> {
-    const order = await this.db
-      .selectFrom('orders')
-      .select(['id', 'delivery_type'])
-      .where('id', '=', orderId)
-      .executeTakeFirst();
-    if (!order) throw new NotFoundDomainError('order', orderId);
-    if (order.delivery_type !== 'delivery') {
-      throw new ValidationError('El pedido no es de delivery.');
-    }
+    await this.db.transaction().execute(async (trx) => {
+      const order = await trx
+        .selectFrom('orders')
+        .select([
+          'id',
+          'delivery_type',
+          'status',
+          'delivery_quote_status',
+          'delivery_latitude',
+          'delivery_longitude',
+        ])
+        .where('id', '=', orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) throw new NotFoundDomainError('order', orderId);
+      if (order.delivery_type !== 'delivery') {
+        throw new ValidationError('El pedido no es de delivery.');
+      }
 
-    await this.db
+      const outcome = await this.applyLocationLocked(trx, order, location);
+      if (outcome.decision === 'conflict') {
+        throw new DomainException(
+          'location_conflict',
+          HttpStatus.CONFLICT,
+          'El pedido ya tiene una ubicación cotizada distinta; no se modifica.',
+          { status: order.status, deliveryQuoteStatus: order.delivery_quote_status },
+        );
+      }
+    });
+    return this.findById(orderId);
+  }
+
+  /**
+   * Decide y aplica una ubicación sobre un pedido YA bloqueado (FOR UPDATE)
+   * dentro de `trx`. Compartido por `attachLocation` y por
+   * `POST /internal/agent/locations/attach`. Devuelve la decisión; solo
+   * escribe (y cotiza) en 'attach' y 'replace'.
+   */
+  async applyLocationLocked(
+    trx: Transaction<Database>,
+    order: {
+      id: string;
+      status: string;
+      delivery_quote_status: string | null;
+      delivery_latitude: number | null;
+      delivery_longitude: number | null;
+    },
+    location: { latitude: number; longitude: number },
+  ): Promise<{ decision: LocationAttachDecision; quote?: OrderQuoteResponse }> {
+    const decision = decideLocationAttach(order, location);
+
+    if (decision === 'not_awaiting') {
+      throw new DomainException(
+        'order_not_quotable',
+        HttpStatus.CONFLICT,
+        `El pedido no está esperando ubicación (status=${order.status}).`,
+      );
+    }
+    if (decision === 'conflict' || decision === 'already_attached') return { decision };
+
+    await trx
       .updateTable('orders')
       .set({
         delivery_latitude: location.latitude,
         delivery_longitude: location.longitude,
         updated_at: new Date(),
       })
-      .where('id', '=', orderId)
+      .where('id', '=', order.id)
       .execute();
-
-    await this.deliveryService.quoteForOrder(orderId);
-    return this.findById(orderId);
+    const quote = await this.deliveryService.quoteForOrderInTransaction(trx, order.id);
+    return { decision, quote };
   }
 
   async addKitchenNote(orderId: string, note: string): Promise<OrderResponse> {

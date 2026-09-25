@@ -188,6 +188,8 @@ export interface DeliveryQuoteRequestsTable {
   distance_meters: number | null;
   distance_source: 'mapbox' | 'straight_line' | 'reused' | null;
   fee_amount: string | null;
+  /** Recargo por lluvia vigente al cotizar; null en filas viejas (= sin recargo). */
+  surcharge_amount: string | null;
   error_code: string | null;
   created_at: Timestamp;
 }

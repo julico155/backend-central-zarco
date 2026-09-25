@@ -8,6 +8,7 @@ import {
   ValidationError,
 } from '../common/exceptions/domain-exception';
 import { FindOrCreateCustomerDto } from './dto/find-or-create-customer.dto';
+import { normalizePhone } from './normalize-phone';
 
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
@@ -38,7 +39,7 @@ export class CustomersService {
     const row = await this.db
       .selectFrom('customers')
       .selectAll()
-      .where('phone', '=', phone)
+      .where('phone', '=', normalizePhone(phone))
       .executeTakeFirst();
     return row ? toCustomerResponse(row) : null;
   }
@@ -54,7 +55,11 @@ export class CustomersService {
    * confirmación humana es más peligroso que rechazar), se traduce a un
    * 409 de dominio en vez de dejar escapar el error crudo de Postgres.
    */
-  async findOrCreate(dto: FindOrCreateCustomerDto): Promise<CustomerResponse> {
+  async findOrCreate(rawDto: FindOrCreateCustomerDto): Promise<CustomerResponse> {
+    const dto: FindOrCreateCustomerDto = {
+      ...rawDto,
+      phone: rawDto.phone === undefined ? undefined : normalizePhone(rawDto.phone),
+    };
     if (!dto.phone && !dto.email && !dto.name) {
       throw new ValidationError('Se requiere al menos uno de: phone, email, name.');
     }
