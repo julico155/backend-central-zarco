@@ -57,7 +57,7 @@ export class BanecoClientService {
       modifyAmount: false,
     });
     if (raw.responseCode !== 0 || !raw.qrId) {
-      throw new Error(`generateQR falló: responseCode=${raw.responseCode} message=${raw.message}`);
+      throw new Error(`generateQR falló: responseCode=${raw.responseCode}`);
     }
     return { qrId: raw.qrId, qrImageBase64: raw.qrImage, raw };
   }
@@ -107,7 +107,7 @@ export class BanecoClientService {
     }
     const body = (await response.json()) as { token: string; responseCode: number; message: string };
     if (body.responseCode !== 0 || !body.token) {
-      throw new Error(`Baneco /authenticate rechazado: ${body.message}`);
+      throw new Error(`Baneco /authenticate rechazado: responseCode=${body.responseCode}`);
     }
     this.cachedToken = body.token;
     return body.token;
@@ -132,7 +132,7 @@ export class BanecoClientService {
     }
 
     if (response.status < 200 || response.status >= 300) {
-      this.logger.warn(`Baneco ${method} ${path} -> ${response.status} ${response.text}`);
+      this.logger.warn(`Baneco ${method} ${path} -> HTTP ${response.status}`);
       throw new Error(`Baneco ${method} ${path} -> HTTP ${response.status}`);
     }
     return JSON.parse(response.text) as T;

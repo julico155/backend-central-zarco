@@ -98,14 +98,14 @@ export class BankQrController {
     try {
       await this.qrPayments.recordNotifyPayload(qrId, body);
       if (qrId) await this.qrPayments.resolveCharge(qrId);
-    } catch (error) {
+    } catch {
       // El cron reintenta igual, así que un fallo acá no pierde el pago;
       // se le informa al banco para que quede en su traza.
-      this.logger.error(`notifyPaymentQR falló para ${qrId}: ${(error as Error).message}`);
+      this.logger.error('notifyPaymentQR failed');
       return { responseCode: 1, message: 'Error procesando la notificación.' };
     }
     if (!qrId) {
-      this.logger.warn(`notifyPaymentQR sin qrId reconocible: ${JSON.stringify(body)}`);
+      this.logger.warn('notifyPaymentQR missing recognizable qrId');
       return { responseCode: 1, message: 'Falta qrId en la notificación.' };
     }
     return { responseCode: 0, message: '' };

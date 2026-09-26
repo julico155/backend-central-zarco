@@ -76,9 +76,17 @@ function parseCorsOrigins(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function requiredEnv(name: 'DATABASE_URL' | 'JWT_SECRET'): string {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
 export default (): AppConfig => ({
   port: Number(process.env.PORT ?? 3000),
-  databaseUrl: process.env.DATABASE_URL ?? '',
+  databaseUrl: requiredEnv('DATABASE_URL'),
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   serviceAuth: {
     tokens: parseServiceAuthTokens(process.env.SERVICE_AUTH_TOKENS),
@@ -88,7 +96,7 @@ export default (): AppConfig => ({
     authToken: process.env.GATEWAY_AUTH_TOKEN ?? '',
   },
   jwt: {
-    secret: process.env.JWT_SECRET ?? '',
+    secret: requiredEnv('JWT_SECRET'),
     expiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
   },
   mapbox: {

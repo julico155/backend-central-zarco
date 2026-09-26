@@ -12,8 +12,8 @@ const jwtModule = JwtModule.registerAsync({
   useFactory: (config: ConfigService<AppConfig, true>) => {
     const jwt = config.get('jwt', { infer: true });
     // expiresIn de @nestjs/jwt tipa contra el union literal de jsonwebtoken
-    // (ej. '8h'), no contra `string` genérico — JWT_EXPIRES_IN ya llega
-    // validado por convención de .env, no por el compilador.
+    // (ej. '8h'), no contra `string` genérico. JWT_SECRET ya fue validado
+    // al cargar la configuración de la aplicación.
     return { secret: jwt.secret, signOptions: { expiresIn: jwt.expiresIn as any } };
   },
 });

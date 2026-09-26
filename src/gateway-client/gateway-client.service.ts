@@ -64,8 +64,10 @@ export class GatewayClientService {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      this.logger.warn(`Gateway call failed: POST ${path} -> ${response.status} ${text}`);
+      const requestId = safeCorrelationId(response.headers);
+      this.logger.warn(
+        `Gateway call failed: POST ${path} -> ${response.status}${requestId ? ` requestId=${requestId}` : ''}`,
+      );
       throw new Error(`Gateway call failed: POST ${path} -> ${response.status}`);
     }
 
@@ -74,4 +76,9 @@ export class GatewayClientService {
     }
     return (await response.json()) as T;
   }
+}
+
+function safeCorrelationId(headers: Headers): string | null {
+  const value = headers.get('x-request-id') ?? headers.get('x-correlation-id');
+  return value && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : null;
 }
