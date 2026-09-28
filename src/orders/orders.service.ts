@@ -276,6 +276,24 @@ export class OrdersService {
       );
     }
 
+    // Delivery espera ubicación/cotización antes de cobrar (ver
+    // sendQrConfirmationIfDue): recién cuando el pedido pasa a 'confirmed'
+    // con el total ya congelado se manda el QR.
+    if (order.status !== 'awaiting_location') {
+      await this.sendQrConfirmation(order);
+    }
+  }
+
+  /**
+   * Genera el QR real del banco y lo manda por WhatsApp. Se llama solo
+   * cuando el pedido ya tiene su total final: en la creación misma para
+   * pickup/mesa (no esperan nada más), y recién tras cotizar para delivery
+   * (ver `attachLocation` y `AgentLocationsService`) — mandarlo antes cobraría
+   * un total que todavía puede cambiar con la ubicación.
+   */
+  private async sendQrConfirmation(order: OrderResponse): Promise<void> {
+    if (!order.customerId) return;
+
     // El external_message_id de ESTE envío es lo que PaymentProofsService
     // usa para "reply_to_qr" (invariante de asociación nivel 1) — se sigue
     // mandando bajo el mismo kind 'qr_confirmation' así ese matching no se
@@ -285,39 +303,51 @@ export class OrdersService {
     const posManualMode =
       order.channel === 'pos' && this.config.get('posQrMode', { infer: true }) === 'manual';
 
-    if (order.paymentMethod === 'qr' && !posManualMode) {
-      let payload: { customerId: string; text: string; imageUrl?: string };
-      try {
-        const charge = await this.qrPayments.generateForOrder(order.id);
-        payload = {
-          customerId: order.customerId,
-          // subtotalAmount, no totalAmount: el QR cobra solo la comida —
-          // el envío (si es delivery) se lo paga al repartidor al entregar.
-          text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
-          imageUrl: charge.qrImageUrl,
-        };
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo generar el QR real para ${order.id}, cae a texto: ${(error as Error).message}`,
-        );
-        payload = {
-          customerId: order.customerId,
-          text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
-        };
-      }
-      try {
-        await this.notifications.notifyNow({
-          channel: 'whatsapp',
-          kind: 'qr_confirmation',
-          targetRef: order.id,
-          payload,
-        });
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo notificar qr_confirmation para ${order.id}: ${(error as Error).message}`,
-        );
-      }
+    if (order.paymentMethod !== 'qr' || posManualMode) return;
+
+    let payload: { customerId: string; text: string; imageUrl?: string };
+    try {
+      const charge = await this.qrPayments.generateForOrder(order.id);
+      payload = {
+        customerId: order.customerId,
+        // subtotalAmount, no totalAmount: el QR cobra solo la comida —
+        // el envío (si es delivery) se lo paga al repartidor al entregar.
+        text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
+        imageUrl: charge.qrImageUrl,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo generar el QR real para ${order.id}, cae a texto: ${(error as Error).message}`,
+      );
+      payload = {
+        customerId: order.customerId,
+        text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
+      };
     }
+    try {
+      await this.notifications.notifyNow({
+        channel: 'whatsapp',
+        kind: 'qr_confirmation',
+        targetRef: order.id,
+        payload,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo notificar qr_confirmation para ${order.id}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Dispara el QR recién cotizado: lo llaman `attachLocation` y
+   * `AgentLocationsService` fuera de su transacción (mismo motivo que
+   * `notifyOrderCreated` — la llamada al banco no puede sostener el trx
+   * abierto), y solo cuando `quoteForOrderInTransaction`/`setManualQuote`
+   * acaban de congelar el total (`result === 'applied'`), nunca en un replay.
+   */
+  async sendQrConfirmationAfterQuote(orderId: string): Promise<void> {
+    const order = await this.findById(orderId);
+    await this.sendQrConfirmation(order);
   }
 
   /**
@@ -846,6 +876,7 @@ export class OrdersService {
     orderId: string,
     location: { latitude: number; longitude: number },
   ): Promise<OrderResponse> {
+    let quoteJustApplied = false;
     await this.db.transaction().execute(async (trx) => {
       const order = await trx
         .selectFrom('orders')
@@ -874,8 +905,15 @@ export class OrdersService {
           { status: order.status, deliveryQuoteStatus: order.delivery_quote_status },
         );
       }
+      quoteJustApplied = outcome.quote?.result === 'applied';
     });
-    return this.findById(orderId);
+    const result = await this.findById(orderId);
+    if (quoteJustApplied) {
+      this.sendQrConfirmationAfterQuote(orderId).catch((error: Error) =>
+        this.logger.warn(`No se pudo notificar QR tras cotizar ${orderId}: ${error.message}`),
+      );
+    }
+    return result;
   }
 
   /**

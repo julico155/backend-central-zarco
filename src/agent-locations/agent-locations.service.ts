@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kysely, sql, Transaction } from 'kysely';
 import { AppConfig } from '../config/configuration';
@@ -53,6 +53,8 @@ const summarize = (o: {
  */
 @Injectable()
 export class AgentLocationsService {
+  private readonly logger = new Logger(AgentLocationsService.name);
+
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly idempotency: IdempotencyService,
@@ -82,6 +84,18 @@ export class AgentLocationsService {
       },
       execute: async (trx) => ({ status: 200, body: await this.resolve(trx, phone, location) }),
     });
+
+    // Recién acá el pedido tiene total final (ver
+    // OrdersService.sendQrConfirmationAfterQuote): fuera de la transacción del
+    // idempotency.run y solo en una ejecución real, nunca en un replay.
+    if (outcome.created && outcome.body.result === 'attached' && outcome.body.quote.result === 'applied') {
+      const { orderId } = outcome.body;
+      this.orders
+        .sendQrConfirmationAfterQuote(orderId)
+        .catch((error: Error) =>
+          this.logger.warn(`No se pudo notificar QR tras cotizar ${orderId}: ${error.message}`),
+        );
+    }
     return outcome.body;
   }
 

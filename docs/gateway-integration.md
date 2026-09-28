@@ -167,12 +167,20 @@ agente ya **no** puede confirmar ni cancelar cobros en efectivo
 (`cash/confirm` y `cash/cancel` son solo para staff).
 
 Para pedidos con `paymentMethod: "qr"`, el backend genera un QR real del
-banco apenas se crea el pedido (por `subtotalAmount`, ver arriba) y te lo
-manda solo, como un mensaje normal (`POST /gateway/whatsapp/messages` con
-`imageUrl`) — no hace falta que el agente pida nada. La confirmación del
-pago también es automática (el backend consulta al banco solo); cuando se
-confirma, el agente recibe otro mensaje saliente normal avisándole al
-cliente.
+banco (por `subtotalAmount`, ver arriba) y te lo manda solo, como un mensaje
+normal (`POST /gateway/whatsapp/messages` con `imageUrl`) — no hace falta que
+el agente pida nada. **El momento en que se manda depende del tipo de
+pedido**: pickup y mesa no esperan nada más, así que el QR sale apenas se
+crea el pedido. Delivery todavía no tiene el total final (falta el envío,
+que se calcula recién con la ubicación) — el QR sale recién cuando el pedido
+pasa de `awaiting_location` a `confirmed` con la cotización aplicada, es
+decir tras `POST /internal/agent/locations/attach` (sección 2.3) con
+resultado `attached` y cotización `applied`. Si la ubicación cae
+`pending_manual` (fuera del techo automático), el QR espera a que un
+`admin`/`cashier` fije el monto a mano; ahí también se manda solo. La
+confirmación del pago es automática (el backend consulta al banco solo);
+cuando se confirma, el agente recibe otro mensaje saliente normal avisándole
+al cliente.
 
 Si por algún motivo el banco falla al generar el QR, el backend cae a pedir
 la captura como antes (mismo mecanismo de `payment-proofs` de abajo) — el

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { CommonModule } from '../common/common.module';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsOutModule } from '../notifications-out/notifications-out.module';
@@ -16,7 +16,7 @@ import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
     AuthModule,
     NotificationsOutModule,
     OperationalSettingsModule,
-    DeliveryModule,
+    forwardRef(() => DeliveryModule),
     CashRegisterModule,
     BankQrModule,
   ],
