@@ -29,7 +29,6 @@ import { DeliveryService, OrderQuoteResponse } from '../delivery/delivery.servic
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
-import { DeliveryNoticesService } from '../delivery-notices/delivery-notices.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 import { decideLocationAttach, LocationAttachDecision } from './location-attach';
@@ -144,7 +143,6 @@ export class OrdersService {
     private readonly notifications: NotificationsOutService,
     private readonly cashRegister: CashRegisterService,
     private readonly qrPayments: QrPaymentsService,
-    private readonly deliveryNotices: DeliveryNoticesService,
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
@@ -1216,13 +1214,6 @@ export class OrdersService {
       this.logger.warn(`cash_confirmation_notification_failed orderId=${order.id}`);
     }
 
-    // La decisión de caja ya fue confirmada en DB. El aviso al grupo es
-    // best-effort y vuelve a validar delivery+quote+pago dentro del servicio.
-    try {
-      await this.deliveryNotices.notifyConfirmed(order.id);
-    } catch {
-      this.logger.warn(`delivery_notice_notification_failed orderId=${order.id}`);
-    }
   }
 
   /**

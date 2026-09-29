@@ -6,7 +6,6 @@ import { OperationalSettingsModule } from '../operational-settings/operational-s
 import { DeliveryModule } from '../delivery/delivery.module';
 import { CashRegisterModule } from '../cash-register/cash-register.module';
 import { BankQrModule } from '../bank-qr/bank-qr.module';
-import { DeliveryNoticesModule } from '../delivery-notices/delivery-notices.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
@@ -20,7 +19,6 @@ import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
     forwardRef(() => DeliveryModule),
     CashRegisterModule,
     BankQrModule,
-    DeliveryNoticesModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, UnpaidOrdersExpiryCron],
