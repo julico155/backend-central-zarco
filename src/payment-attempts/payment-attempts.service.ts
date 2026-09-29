@@ -97,10 +97,16 @@ export class PaymentAttemptsService {
     });
 
     if (result.won) {
-      await this.notifyCustomerBestEffort(attemptId, result.customerId, decision);
-      if (decision === 'accepted' && result.paymentPaid) {
-        await this.notifyDeliveryBestEffort(result.attempt.orderId);
-      }
+      // La transacción ya confirmó la decisión comercial. No se espera red
+      // externa aquí: QrPaymentsService debe poder continuar resolviendo el
+      // cargo bancario aunque el gateway esté lento o caído.
+      void this.notifyDecisionBestEffort(
+        attemptId,
+        result.attempt.orderId,
+        result.customerId,
+        decision,
+        result.paymentPaid,
+      );
     }
     return { attempt: result.attempt, won: result.won };
   }
@@ -175,10 +181,13 @@ export class PaymentAttemptsService {
       };
     });
 
-    await this.notifyCustomerBestEffort(result.attempt.id, result.customerId, decision);
-    if (decision === 'accepted' && result.paymentPaid) {
-      await this.notifyDeliveryBestEffort(result.attempt.orderId);
-    }
+    void this.notifyDecisionBestEffort(
+      result.attempt.id,
+      result.attempt.orderId,
+      result.customerId,
+      decision,
+      result.paymentPaid,
+    );
     return { attempt: result.attempt, won: result.won };
   }
 
@@ -263,6 +272,20 @@ export class PaymentAttemptsService {
       });
     } catch {
       this.logger.warn(`payment_decision_notification_failed attemptId=${attemptId}`);
+    }
+  }
+
+  /** Mantiene WhatsApp antes del grupo de delivery, fuera del camino crítico de pago. */
+  private async notifyDecisionBestEffort(
+    attemptId: string,
+    orderId: string,
+    customerId: string | null,
+    decision: 'accepted' | 'rejected',
+    paymentPaid: boolean,
+  ): Promise<void> {
+    await this.notifyCustomerBestEffort(attemptId, customerId, decision);
+    if (decision === 'accepted' && paymentPaid) {
+      await this.notifyDeliveryBestEffort(orderId);
     }
   }
 

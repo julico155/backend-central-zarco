@@ -75,6 +75,7 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
     const { service, deliveryNotices } = createService({ decision: 'accepted' });
 
     await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
 
     expect(deliveryNotices.notifyConfirmed).toHaveBeenCalledWith('order-1');
   });
@@ -83,6 +84,7 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
     const { service, deliveryNotices } = createService({ decision: 'rejected' });
 
     await service.decide('attempt-1', 'rejected');
+    await flushNotifications();
 
     expect(deliveryNotices.notifyConfirmed).not.toHaveBeenCalled();
   });
@@ -91,6 +93,7 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
     const { service, deliveryNotices } = createService({ decision: 'accepted', casWinner: false });
 
     await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
 
     expect(deliveryNotices.notifyConfirmed).not.toHaveBeenCalled();
   });
@@ -103,6 +106,7 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
     });
 
     await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
 
     expect(deliveryNotices.notifyConfirmed).not.toHaveBeenCalled();
   });
@@ -115,6 +119,7 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
     });
 
     await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
 
     expect(deliveryNotices.notifyConfirmed).toHaveBeenCalledTimes(1);
     expect(deliveryNotices.notifyConfirmed).toHaveBeenCalledWith('order-1');
@@ -124,5 +129,23 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
     const { service } = createService({ decision: 'accepted', deliveryRejects: true });
 
     await expect(service.decide('attempt-1', 'accepted')).resolves.toMatchObject({ won: true });
+    await flushNotifications();
+  });
+
+  it('returns the accepted decision without waiting for a slow notification gateway', async () => {
+    const { service } = createService({ decision: 'accepted' });
+    const notifications = (service as unknown as { notifications: { notifyNow: jest.Mock } }).notifications;
+    notifications.notifyNow.mockImplementation(() => new Promise<void>(() => undefined));
+
+    await expect(
+      Promise.race([
+        service.decide('attempt-1', 'accepted'),
+        new Promise<'timed_out'>((resolve) => setTimeout(() => resolve('timed_out'), 25)),
+      ]),
+    ).resolves.not.toBe('timed_out');
   });
 });
+
+async function flushNotifications(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}

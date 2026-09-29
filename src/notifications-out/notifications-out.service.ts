@@ -43,7 +43,9 @@ export class NotificationsOutService {
   /** Encola el trabajo (dedupe por kind+target_ref) e intenta enviarlo ya. */
   async notifyNow(job: NotificationJobPayload): Promise<void> {
     const id = await this.enqueue(job);
-    await this.dispatch(id, job.channel, job.kind, job.payload as unknown as Record<string, unknown>);
+    const attempts = await this.claimForFastPath(id);
+    if (attempts === null) return;
+    await this.dispatch(id, job.channel, job.kind, job.payload as unknown as Record<string, unknown>, attempts);
   }
 
   /**
@@ -100,26 +102,32 @@ export class NotificationsOutService {
   }
 
   /**
-   * `attemptsAfterClaim` solo llega desde recoverFailedJobs (ya incluye el
-   * +1 del UPDATE de reclamo); el camino rápido no lo necesita porque un
-   * fallo ahí simplemente deja que la recuperación lo levante después.
+   * Solo quien cambia pending|failed -> sending puede hacer el envío rápido.
+   * Si el job ya está sent o otra instancia lo está enviando, no se reenvía.
+   */
+  private async claimForFastPath(id: string): Promise<number | null> {
+    const claimed = await this.db
+      .updateTable('notification_jobs')
+      .set({ status: 'sending', attempts: (eb) => eb('attempts', '+', 1), updated_at: new Date() })
+      .where('id', '=', id)
+      .where('status', 'in', ['pending', 'failed'])
+      .returning('attempts')
+      .executeTakeFirst();
+    return claimed?.attempts ?? null;
+  }
+
+  /**
+   * Siempre recibe el contador posterior al claim. El camino rápido y el de
+   * recovery reclaman antes de llamar a este método; así no existe una ruta
+   * que pueda entregar una fila ya sent o tomada por otra instancia.
    */
   private async dispatch(
     id: string,
     channel: string,
     kind: string,
     payload: Record<string, unknown>,
-    attemptsAfterClaim?: number,
+    attemptsAfterClaim: number,
   ): Promise<void> {
-    if (attemptsAfterClaim === undefined) {
-      await this.db
-        .updateTable('notification_jobs')
-        .set({ status: 'sending', attempts: (eb) => eb('attempts', '+', 1) })
-        .where('id', '=', id)
-        .where('status', 'in', ['pending', 'failed'])
-        .execute();
-    }
-
     try {
       const externalMessageId = await this.send(channel, kind, payload);
       await this.db
@@ -129,13 +137,13 @@ export class NotificationsOutService {
         .execute();
     } catch (error) {
       this.logger.warn(`Notification job ${id} failed: ${(error as Error).message}`);
-      const attempts = attemptsAfterClaim ?? 1;
-      const backoffMs = Math.min(BASE_BACKOFF_MS * 2 ** (attempts - 1), MAX_BACKOFF_MS);
+      const backoffMs = Math.min(BASE_BACKOFF_MS * 2 ** (attemptsAfterClaim - 1), MAX_BACKOFF_MS);
       await this.db
         .updateTable('notification_jobs')
         .set({
           status: 'failed',
-          last_error_code: attempts >= MAX_ATTEMPTS ? 'max_attempts_exceeded' : 'gateway_error',
+          last_error_code:
+            attemptsAfterClaim >= MAX_ATTEMPTS ? 'max_attempts_exceeded' : 'gateway_error',
           next_attempt_at: new Date(Date.now() + backoffMs),
         })
         .where('id', '=', id)
