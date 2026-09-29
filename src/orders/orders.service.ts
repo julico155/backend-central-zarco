@@ -97,6 +97,10 @@ export type CreateOrderOutcome =
   | { httpStatus: 200 | 201; body: OrderResponse }
   | { httpStatus: 202; body: LateOrderRequestAcceptedResponse };
 
+export function buildLateOrderTelegramAction(action: 'accept' | 'reject', id: string): string {
+  return `late_order.${action}:${id}`;
+}
+
 export interface CheckoutCartInput {
   customerId: string | null;
   channel: OrderChannel;
@@ -837,8 +841,8 @@ export class OrdersService {
             chatRef: 'staff-group',
             text: `Solicitud fuera de horario ${inserted.request_number} — ${inserted.customer_name}, total ${inserted.subtotal_amount}.`,
             buttons: [
-              { label: 'Aceptar', action: `late-order-requests/${inserted.id}/accept` },
-              { label: 'Rechazar', action: `late-order-requests/${inserted.id}/reject` },
+              { label: 'Aceptar', action: buildLateOrderTelegramAction('accept', inserted.id) },
+              { label: 'Rechazar', action: buildLateOrderTelegramAction('reject', inserted.id) },
             ],
           },
         });
