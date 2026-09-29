@@ -22,6 +22,7 @@ function createService(
   existing.where.mockReturnValue(existing);
   existing.executeTakeFirstOrThrow.mockResolvedValue(inserted);
 
+  const updates: Array<{ where: jest.Mock }> = [];
   const db = {
     insertInto: jest.fn().mockReturnValue(insert),
     selectFrom: jest.fn().mockReturnValue(existing),
@@ -36,6 +37,7 @@ function createService(
         }),
       });
       update.execute.mockResolvedValue([]);
+      updates.push(update);
       return update;
     }),
   };
@@ -43,6 +45,7 @@ function createService(
   return {
     service: new NotificationsOutService(db as never, gateway as never),
     gateway,
+    updates,
   };
 }
 
@@ -54,17 +57,59 @@ const deliveryNotice = {
 };
 
 describe('NotificationsOutService fast-path claim', () => {
-  it('sends the same delivery_notice twice only once', async () => {
-    const { service, gateway } = createService([1, undefined], [{ id: 'job-1' }, undefined]);
+  it('claims and sends a normal pending job', async () => {
+    const { service, gateway, updates } = createService([1]);
 
     await service.notifyNow(deliveryNotice);
+
+    expect(gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(updates[0].where).toHaveBeenCalledWith('status', 'in', ['pending', 'failed']);
+    expect(updates[0].where).toHaveBeenCalledWith('attempts', '<', 8);
+    expect(updates[0].where).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it('claims and sends a failed job whose next attempt is due', async () => {
+    const { service, gateway } = createService([2], [undefined]);
+
     await service.notifyNow(deliveryNotice);
 
     expect(gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
   });
 
-  it('does not resend a job that is already sent', async () => {
-    const { service, gateway } = createService([undefined]);
+  it('does not send a failed job before its next_attempt_at', async () => {
+    const { service, gateway } = createService([undefined], [undefined]);
+
+    await service.notifyNow(deliveryNotice);
+
+    expect(gateway.sendTelegramAlert).not.toHaveBeenCalled();
+  });
+
+  it('does not send a job at MAX_ATTEMPTS', async () => {
+    const { service, gateway } = createService([undefined], [undefined]);
+
+    await service.notifyNow(deliveryNotice);
+
+    expect(gateway.sendTelegramAlert).not.toHaveBeenCalled();
+  });
+
+  it('does not send a job beyond MAX_ATTEMPTS', async () => {
+    const { service, gateway } = createService([undefined], [undefined]);
+
+    await service.notifyNow(deliveryNotice);
+
+    expect(gateway.sendTelegramAlert).not.toHaveBeenCalled();
+  });
+
+  it('does not resend a sent job', async () => {
+    const { service, gateway } = createService([undefined], [undefined]);
+
+    await service.notifyNow(deliveryNotice);
+
+    expect(gateway.sendTelegramAlert).not.toHaveBeenCalled();
+  });
+
+  it('does not send a job another process is already sending', async () => {
+    const { service, gateway } = createService([undefined], [undefined]);
 
     await service.notifyNow(deliveryNotice);
 
@@ -79,9 +124,10 @@ describe('NotificationsOutService fast-path claim', () => {
     expect(gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);
   });
 
-  it('allows a pending or failed eligible job to be retried after its claim', async () => {
-    const { service, gateway } = createService([3]);
+  it('sends the same delivery_notice twice only once', async () => {
+    const { service, gateway } = createService([1, undefined], [{ id: 'job-1' }, undefined]);
 
+    await service.notifyNow(deliveryNotice);
     await service.notifyNow(deliveryNotice);
 
     expect(gateway.sendTelegramAlert).toHaveBeenCalledTimes(1);

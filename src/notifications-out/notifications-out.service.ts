@@ -111,6 +111,10 @@ export class NotificationsOutService {
       .set({ status: 'sending', attempts: (eb) => eb('attempts', '+', 1), updated_at: new Date() })
       .where('id', '=', id)
       .where('status', 'in', ['pending', 'failed'])
+      .where('attempts', '<', MAX_ATTEMPTS)
+      .where((eb) =>
+        eb.or([eb('next_attempt_at', 'is', null), eb('next_attempt_at', '<=', sql<Date>`now()`)]),
+      )
       .returning('attempts')
       .executeTakeFirst();
     return claimed?.attempts ?? null;
