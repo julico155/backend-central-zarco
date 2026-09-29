@@ -95,13 +95,13 @@ Respuestas posibles:
 ### 2.4 Delivery: pedir y adjuntar ubicación
 
 Al crear un pedido de delivery, apenas queda en `awaiting_location` el
-backend manda solo, como dos mensajes salientes normales seguidos: primero
-`order_received` y después `location_request` (sección 3.2) — **no hace
-falta que el agente lo pida**. El mensaje es texto plano, no un pin ni un
-botón interactivo: convertilo a algo como *"Por favor comparte tu ubicación
-actual para coordinar el delivery. Toca el clip 📎 → Ubicación → ENVIAR
-UBICACIÓN ACTUAL"*. Un reintento de creación con el mismo
-`Idempotency-Key` no vuelve a mandarlo (solo pasa en la creación real).
+backend manda **una sola** solicitud (`location_request`, sección 3.2) —
+**no hace falta que el agente lo pida**. Central solo entrega los datos
+(`reason` + `orderNumber`); el copy final (incluido el "recibimos tu
+pedido") lo arma el agente — ver sección 3.2 para el texto canónico
+esperado. Pickup y mesa sí reciben `order_received` (sección 3.1) porque no
+esperan ubicación. Un reintento de creación con el mismo `Idempotency-Key`
+no vuelve a mandar nada (solo pasa en la creación real).
 
 ```
 POST /orders/:id/location-request     // reenvío manual, por si hace falta pedirla de nuevo
@@ -188,8 +188,12 @@ resultado `attached` y cotización `applied`. Si la ubicación cae
 `pending_manual` (fuera del techo automático), el QR espera a que un
 `admin`/`cashier` fije el monto a mano; ahí también se manda solo. La
 confirmación del pago es automática (el backend consulta al banco solo);
-cuando se confirma, el agente recibe otro mensaje saliente normal avisándole
-al cliente.
+cuando se confirma, el agente recibe una intención estructurada —
+`POST /gateway/whatsapp/messages` con `messageType: "payment_confirmed"` y
+`context.deliveryType` (`"delivery" | "pickup" | "dine_in"`), **sin
+`text`** — para que sea el agente quien redacte el mensaje final (copy
+determinístico, sin IA), no Central. Ver sección 3.1 para el texto exacto
+esperado por tipo de pedido.
 
 Si por algún motivo el banco falla al generar el QR, el backend cae a pedir
 la captura como antes (mismo mecanismo de `payment-proofs` de abajo) — el
@@ -233,11 +237,40 @@ devolver un error HTTP ante un fallo real (en vez de colgarse) es correcto.
 
 ### 3.1 Enviar mensaje de WhatsApp
 
+Formato legacy — Central ya arma el texto final, lo mandás tal cual:
+
 ```
 POST /gateway/whatsapp/messages
 { "customerId": "<uuid>", "text": "Recibimos tu pedido ORD-000123.", "imageUrl": "..." }  // imageUrl opcional
 → 200 { "externalMessageId": "<id del mensaje que devuelve la API de WhatsApp>" }
 ```
+
+Formato nuevo — intención estructurada, **el agente arma el copy** (sin
+`text`, `messageType` en su lugar):
+
+```
+POST /gateway/whatsapp/messages
+{ "customerId": "<uuid>", "messageType": "payment_confirmed",
+  "context": { "deliveryType": "delivery" } }   // "delivery" | "pickup" | "dine_in"
+→ 200 { "externalMessageId": "..." }
+```
+
+Copy exacto esperado por `deliveryType` (determinístico, sin IA):
+
+| `deliveryType` | Texto |
+|---|---|
+| `delivery` | Pago confirmado ✅. Tu pedido está siendo preparado. El delivery tiene tu número y te llamará cuando llegue con tu pedido. |
+| `pickup` | Pago confirmado ✅. Tu pedido está siendo preparado. Te esperamos con el chat en mano cuando vengas a recogerlo. |
+| `dine_in` | Pago confirmado ✅. Tu pedido está siendo preparado. |
+
+`messageType: "payment_rejected"` está reservado en el contrato pero
+Central todavía no lo emite en esta fase — el rechazo sigue llegando como
+`text` legacy.
+
+Ambos formatos conviven: un `payload` puede traer `text`/`imageUrl`
+(legacy), o `messageType`/`context` (nuevo) — nunca mezclados. Soportá los
+dos desde el arranque, porque Central puede empezar a mandar el formato
+nuevo sin previo aviso una vez que ambos lados estén desplegados.
 
 `externalMessageId` es importante: el backend lo guarda y lo usa después
 para reconocer cuándo un cliente **responde directamente** a ese mensaje
@@ -249,8 +282,30 @@ devolvé cualquier string único y estable para ese envío.
 
 ```
 POST /gateway/whatsapp/location-requests
-{ "customerId": "<uuid>", "reason": "delivery_location" }
+{ "customerId": "<uuid>", "reason": "delivery_location", "orderNumber": "ORD-260929-007" }
 → 204 (sin body)
+```
+
+`orderNumber` es nuevo y opcional (compatibilidad hacia atrás: una llamada
+vieja sin `orderNumber` sigue siendo válida). Con `orderNumber`, armá el
+mensaje canónico — mostrando el pedido corto (`ORD-AAMMDD-NNN` → `#N`; los
+formatos legacy se muestran completos):
+
+```
+📦 Recibimos tu pedido #7.
+
+📍 Ahora envíanos tu *UBICACIÓN ACTUAL* por GPS para calcular el costo del envío 😊
+Pedido ORD-260929-007
+
+Toca el clip 📎 → Ubicación → ENVIAR UBICACIÓN ACTUAL
+```
+
+Sin `orderNumber` (llamada legacy), el fallback:
+
+```
+Por favor comparte tu ubicación actual para coordinar el delivery.
+
+Toca el clip 📎 → Ubicación → ENVIAR UBICACIÓN ACTUAL
 ```
 
 ### 3.3 Alerta a Telegram (grupo de staff)

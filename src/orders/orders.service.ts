@@ -264,6 +264,23 @@ export class OrdersService {
   private async notifyOrderCreated(order: OrderResponse): Promise<void> {
     if (!order.customerId) return;
 
+    // Delivery: UNA sola solicitud (reason + orderNumber) — Central solo
+    // entrega los datos, el agente arma el copy combinado ("recibimos tu
+    // pedido" + "mandanos tu ubicación", ver docs/gateway-integration.md).
+    // No mandamos order_received aparte: sería un segundo mensaje redundante.
+    if (order.status === 'awaiting_location') {
+      try {
+        await this.sendLocationRequest(order.id, order.customerId, order.orderNumber);
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo notificar location_request para ${order.id}: ${(error as Error).message}`,
+        );
+      }
+      return;
+    }
+
+    // Pickup y mesa no esperan nada más de una — a esos sí les llega
+    // order_received, y de una el QR (ver sendQrConfirmation).
     try {
       await this.notifications.notifyNow({
         channel: 'whatsapp',
@@ -280,27 +297,7 @@ export class OrdersService {
       );
     }
 
-    // Delivery espera ubicación/cotización antes de cobrar (ver
-    // sendQrConfirmationIfDue): recién cuando el pedido pasa a 'confirmed'
-    // con el total ya congelado se manda el QR. Mientras tanto, le pedimos la
-    // ubicación de una — el agente la traduce a texto plano, no a un pin ni
-    // un botón interactivo (ver docs/gateway-integration.md).
-    if (order.status === 'awaiting_location') {
-      try {
-        await this.notifications.notifyNow({
-          channel: 'whatsapp',
-          kind: 'location_request',
-          targetRef: order.id,
-          payload: { customerId: order.customerId, reason: 'delivery_location' },
-        });
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo notificar location_request para ${order.id}: ${(error as Error).message}`,
-        );
-      }
-    } else {
-      await this.sendQrConfirmation(order);
-    }
+    await this.sendQrConfirmation(order);
   }
 
   /**
@@ -865,7 +862,7 @@ export class OrdersService {
   async requestLocation(orderId: string): Promise<void> {
     const order = await this.db
       .selectFrom('orders')
-      .select(['id', 'delivery_type', 'customer_id'])
+      .select(['id', 'delivery_type', 'customer_id', 'order_number'])
       .where('id', '=', orderId)
       .executeTakeFirst();
     if (!order) throw new NotFoundDomainError('order', orderId);
@@ -876,11 +873,27 @@ export class OrdersService {
       throw new ValidationError('El pedido no tiene un cliente al cual pedirle ubicación.');
     }
 
+    await this.sendLocationRequest(order.id, order.customer_id, order.order_number);
+  }
+
+  /**
+   * `reason: 'delivery_location'` + `orderNumber`: Central solo entrega
+   * datos, el copy final ("recibimos tu pedido" + pedido de ubicación) lo
+   * arma el agente (ver docs/gateway-integration.md). Sin try/catch acá
+   * adentro a propósito: cada caller decide si el fallo es best-effort
+   * (notifyOrderCreated) o debe propagar (requestLocation, reintento manual
+   * de staff que necesita saber si falló).
+   */
+  private async sendLocationRequest(
+    orderId: string,
+    customerId: string,
+    orderNumber: string,
+  ): Promise<void> {
     await this.notifications.notifyNow({
       channel: 'whatsapp',
       kind: 'location_request',
-      targetRef: order.id,
-      payload: { customerId: order.customer_id, reason: 'delivery_location' },
+      targetRef: orderId,
+      payload: { customerId, reason: 'delivery_location', orderNumber },
     });
   }
 

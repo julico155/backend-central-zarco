@@ -1,7 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
-import { Database, OrderPaymentStatus, PaymentAttemptReviewStatus } from '../database/types';
+import { Database, OrderDeliveryType, OrderPaymentStatus, PaymentAttemptReviewStatus } from '../database/types';
 import {
   DomainException,
   NotFoundDomainError,
@@ -93,6 +93,7 @@ export class PaymentAttemptsService {
         won: true as const,
         customerId: updated.customer_id ?? effect.customerId,
         paymentPaid: effect.paymentPaid,
+        deliveryType: effect.deliveryType,
       };
     });
 
@@ -106,6 +107,7 @@ export class PaymentAttemptsService {
         result.customerId,
         decision,
         result.paymentPaid,
+        result.deliveryType,
       );
     }
     return { attempt: result.attempt, won: result.won };
@@ -178,6 +180,7 @@ export class PaymentAttemptsService {
         won: true as const,
         customerId: order.customer_id ?? effect.customerId,
         paymentPaid: effect.paymentPaid,
+        deliveryType: effect.deliveryType,
       };
     });
 
@@ -187,6 +190,7 @@ export class PaymentAttemptsService {
       result.customerId,
       decision,
       result.paymentPaid,
+      result.deliveryType,
     );
     return { attempt: result.attempt, won: result.won };
   }
@@ -210,10 +214,10 @@ export class PaymentAttemptsService {
     trx: Transaction<Database>,
     orderId: string,
     decision: 'accepted' | 'rejected',
-  ): Promise<{ customerId: string | null; paymentPaid: boolean }> {
+  ): Promise<{ customerId: string | null; paymentPaid: boolean; deliveryType: OrderDeliveryType }> {
     const current = await trx
       .selectFrom('orders')
-      .select(['register_session_id', 'payment_method', 'split_cash_confirmed_at'])
+      .select(['register_session_id', 'payment_method', 'split_cash_confirmed_at', 'delivery_type'])
       .where('id', '=', orderId)
       .executeTakeFirstOrThrow();
 
@@ -225,7 +229,7 @@ export class PaymentAttemptsService {
         .select('customer_id')
         .where('id', '=', orderId)
         .executeTakeFirstOrThrow();
-      return { customerId: order.customer_id, paymentPaid: false };
+      return { customerId: order.customer_id, paymentPaid: false, deliveryType: current.delivery_type };
     }
 
     const fullyPaid = decision === 'accepted' && (!isSplit || current.split_cash_confirmed_at !== null);
@@ -250,20 +254,43 @@ export class PaymentAttemptsService {
       .where('id', '=', orderId)
       .returning(['customer_id'])
       .executeTakeFirstOrThrow();
-    return { customerId: order.customer_id, paymentPaid: paymentStatus === 'paid' };
+    return {
+      customerId: order.customer_id,
+      paymentPaid: paymentStatus === 'paid',
+      deliveryType: current.delivery_type,
+    };
   }
 
+  /**
+   * Central decide QUÉ pasó (accepted+paid vs. rejected vs. accepted pero
+   * split todavía incompleto) y manda una intención estructurada
+   * (`messageType` + `context.deliveryType`) — el copy final lo arma el
+   * agente, no acá. Solo el cierre real (accepted && paymentPaid) usa el
+   * mensaje nuevo; el resto conserva el texto legacy tal cual estaba, fuera
+   * de alcance de este cambio.
+   */
   private async notifyCustomerBestEffort(
     attemptId: string,
     customerId: string | null,
     decision: 'accepted' | 'rejected',
+    paymentPaid: boolean,
+    deliveryType: OrderDeliveryType,
   ): Promise<void> {
     if (!customerId) return;
-    const text =
-      decision === 'accepted'
-        ? 'Tu pago fue confirmado, tu pedido sigue en preparación.'
-        : 'No pudimos validar tu comprobante de pago. Por favor contáctanos para resolverlo.';
     try {
+      if (decision === 'accepted' && paymentPaid) {
+        await this.notifications.notifyNow({
+          channel: 'whatsapp',
+          kind: 'payment_decision',
+          targetRef: attemptId,
+          payload: { customerId, messageType: 'payment_confirmed', context: { deliveryType } },
+        });
+        return;
+      }
+      const text =
+        decision === 'accepted'
+          ? 'Tu pago fue confirmado, tu pedido sigue en preparación.'
+          : 'No pudimos validar tu comprobante de pago. Por favor contáctanos para resolverlo.';
       await this.notifications.notifyNow({
         channel: 'whatsapp',
         kind: 'payment_decision',
@@ -282,8 +309,9 @@ export class PaymentAttemptsService {
     customerId: string | null,
     decision: 'accepted' | 'rejected',
     paymentPaid: boolean,
+    deliveryType: OrderDeliveryType,
   ): Promise<void> {
-    await this.notifyCustomerBestEffort(attemptId, customerId, decision);
+    await this.notifyCustomerBestEffort(attemptId, customerId, decision, paymentPaid, deliveryType);
     if (decision === 'accepted' && paymentPaid) {
       await this.notifyDeliveryBestEffort(orderId);
     }

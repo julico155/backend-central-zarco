@@ -6,6 +6,7 @@ type Scenario = {
   paymentMethod?: 'qr' | 'split';
   splitCashConfirmed?: boolean;
   deliveryRejects?: boolean;
+  deliveryType?: 'delivery' | 'pickup' | 'dine_in';
 };
 
 function createService(scenario: Scenario) {
@@ -22,6 +23,7 @@ function createService(scenario: Scenario) {
     register_session_id: null,
     payment_method: scenario.paymentMethod ?? 'qr',
     split_cash_confirmed_at: scenario.splitCashConfirmed ? new Date() : null,
+    delivery_type: scenario.deliveryType ?? 'delivery',
   };
 
   const attemptsUpdate = {
@@ -67,6 +69,7 @@ function createService(scenario: Scenario) {
   return {
     service: new PaymentAttemptsService(db as never, notifications as never, cashRegister as never, deliveryNotices as never),
     deliveryNotices,
+    notifications,
   };
 }
 
@@ -143,6 +146,76 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
         new Promise<'timed_out'>((resolve) => setTimeout(() => resolve('timed_out'), 25)),
       ]),
     ).resolves.not.toBe('timed_out');
+  });
+});
+
+describe('PaymentAttemptsService payment_decision copy', () => {
+  it('sends a structured payment_confirmed intent with deliveryType when the order becomes fully paid', async () => {
+    const { service, notifications } = createService({ decision: 'accepted', deliveryType: 'delivery' });
+
+    await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
+
+    expect(notifications.notifyNow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'payment_decision',
+        payload: {
+          customerId: 'customer-1',
+          messageType: 'payment_confirmed',
+          context: { deliveryType: 'delivery' },
+        },
+      }),
+    );
+  });
+
+  it('propagates the order deliveryType (pickup) untouched', async () => {
+    const { service, notifications } = createService({ decision: 'accepted', deliveryType: 'pickup' });
+
+    await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
+
+    expect(notifications.notifyNow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ context: { deliveryType: 'pickup' } }),
+      }),
+    );
+  });
+
+  it('keeps the legacy text for an accepted QR leg that leaves a split still unpaid', async () => {
+    const { service, notifications } = createService({
+      decision: 'accepted',
+      paymentMethod: 'split',
+      splitCashConfirmed: false,
+    });
+
+    await service.decide('attempt-1', 'accepted');
+    await flushNotifications();
+
+    expect(notifications.notifyNow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          text: 'Tu pago fue confirmado, tu pedido sigue en preparación.',
+        }),
+      }),
+    );
+    expect(notifications.notifyNow).not.toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ messageType: expect.anything() }) }),
+    );
+  });
+
+  it('keeps the legacy rejected text untouched', async () => {
+    const { service, notifications } = createService({ decision: 'rejected' });
+
+    await service.decide('attempt-1', 'rejected');
+    await flushNotifications();
+
+    expect(notifications.notifyNow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          text: 'No pudimos validar tu comprobante de pago. Por favor contáctanos para resolverlo.',
+        }),
+      }),
+    );
   });
 });
 

@@ -4,13 +4,20 @@ import { AppConfig } from '../config/configuration';
 
 export interface WhatsappMessagePayload {
   customerId: string;
+  /** Legacy: texto ya armado por Central. Se mantiene por compatibilidad — el
+   * flujo nuevo (ver messageType) no lo usa, el agente arma el copy. */
   text?: string;
   imageUrl?: string;
+  /** Intención estructurada: Central decide QUÉ pasó, el agente decide CÓMO decirlo. */
+  messageType?: 'payment_confirmed' | 'payment_rejected';
+  context?: { deliveryType?: 'delivery' | 'pickup' | 'dine_in' };
 }
 
 export interface WhatsappLocationRequestPayload {
   customerId: string;
   reason?: string;
+  /** Pedido completo (ORD-AAMMDD-NNN); el agente decide cómo mostrarlo (#N, etc). */
+  orderNumber?: string;
 }
 
 export interface TelegramAlertPayload {
