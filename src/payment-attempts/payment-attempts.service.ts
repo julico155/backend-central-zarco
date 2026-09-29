@@ -9,6 +9,7 @@ import {
 } from '../common/exceptions/domain-exception';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
+import { DeliveryNoticesService } from '../delivery-notices/delivery-notices.service';
 
 export interface PaymentAttemptResponse {
   id: string;
@@ -38,6 +39,7 @@ export class PaymentAttemptsService {
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly notifications: NotificationsOutService,
     private readonly cashRegister: CashRegisterService,
+    private readonly deliveryNotices: DeliveryNoticesService,
   ) {}
 
   async findByOrder(orderId: string): Promise<PaymentAttemptResponse[]> {
@@ -82,19 +84,23 @@ export class PaymentAttemptsService {
           .where('id', '=', attemptId)
           .executeTakeFirst();
         if (!current) throw new NotFoundDomainError('payment_attempt', attemptId);
-        return { attempt: toResponse(current), won: false as const, customerId: null };
+        return { attempt: toResponse(current), won: false as const, customerId: null, paymentPaid: false };
       }
 
-      const customerId = await this.applyPaymentStatusEffect(trx, updated.order_id, decision);
+      const effect = await this.applyPaymentStatusEffect(trx, updated.order_id, decision);
       return {
         attempt: toResponse(updated),
         won: true as const,
-        customerId: updated.customer_id ?? customerId,
+        customerId: updated.customer_id ?? effect.customerId,
+        paymentPaid: effect.paymentPaid,
       };
     });
 
     if (result.won) {
-      this.notifyCustomerBestEffort(attemptId, result.customerId, decision);
+      await this.notifyCustomerBestEffort(attemptId, result.customerId, decision);
+      if (decision === 'accepted' && result.paymentPaid) {
+        await this.notifyDeliveryBestEffort(result.attempt.orderId);
+      }
     }
     return { attempt: result.attempt, won: result.won };
   }
@@ -160,15 +166,19 @@ export class PaymentAttemptsService {
         throw error;
       }
 
-      const customerId = await this.applyPaymentStatusEffect(trx, orderId, decision);
+      const effect = await this.applyPaymentStatusEffect(trx, orderId, decision);
       return {
         attempt: toResponse(inserted),
         won: true as const,
-        customerId: order.customer_id ?? customerId,
+        customerId: order.customer_id ?? effect.customerId,
+        paymentPaid: effect.paymentPaid,
       };
     });
 
-    this.notifyCustomerBestEffort(result.attempt.id, result.customerId, decision);
+    await this.notifyCustomerBestEffort(result.attempt.id, result.customerId, decision);
+    if (decision === 'accepted' && result.paymentPaid) {
+      await this.notifyDeliveryBestEffort(result.attempt.orderId);
+    }
     return { attempt: result.attempt, won: result.won };
   }
 
@@ -191,7 +201,7 @@ export class PaymentAttemptsService {
     trx: Transaction<Database>,
     orderId: string,
     decision: 'accepted' | 'rejected',
-  ): Promise<string | null> {
+  ): Promise<{ customerId: string | null; paymentPaid: boolean }> {
     const current = await trx
       .selectFrom('orders')
       .select(['register_session_id', 'payment_method', 'split_cash_confirmed_at'])
@@ -206,7 +216,7 @@ export class PaymentAttemptsService {
         .select('customer_id')
         .where('id', '=', orderId)
         .executeTakeFirstOrThrow();
-      return order.customer_id;
+      return { customerId: order.customer_id, paymentPaid: false };
     }
 
     const fullyPaid = decision === 'accepted' && (!isSplit || current.split_cash_confirmed_at !== null);
@@ -231,29 +241,37 @@ export class PaymentAttemptsService {
       .where('id', '=', orderId)
       .returning(['customer_id'])
       .executeTakeFirstOrThrow();
-    return order.customer_id;
+    return { customerId: order.customer_id, paymentPaid: paymentStatus === 'paid' };
   }
 
-  private notifyCustomerBestEffort(
+  private async notifyCustomerBestEffort(
     attemptId: string,
     customerId: string | null,
     decision: 'accepted' | 'rejected',
-  ): void {
+  ): Promise<void> {
     if (!customerId) return;
     const text =
       decision === 'accepted'
         ? 'Tu pago fue confirmado, tu pedido sigue en preparación.'
         : 'No pudimos validar tu comprobante de pago. Por favor contáctanos para resolverlo.';
-    this.notifications
-      .notifyNow({
+    try {
+      await this.notifications.notifyNow({
         channel: 'whatsapp',
         kind: 'payment_decision',
         targetRef: attemptId,
         payload: { customerId, text },
-      })
-      .catch((error: Error) =>
-        this.logger.warn(`No se pudo notificar decisión de pago ${attemptId}: ${error.message}`),
-      );
+      });
+    } catch {
+      this.logger.warn(`payment_decision_notification_failed attemptId=${attemptId}`);
+    }
+  }
+
+  private async notifyDeliveryBestEffort(orderId: string): Promise<void> {
+    try {
+      await this.deliveryNotices.notifyConfirmed(orderId);
+    } catch {
+      this.logger.warn(`delivery_notice_notification_failed orderId=${orderId}`);
+    }
   }
 }
 

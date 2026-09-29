@@ -29,6 +29,7 @@ import { DeliveryService, OrderQuoteResponse } from '../delivery/delivery.servic
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
+import { DeliveryNoticesService } from '../delivery-notices/delivery-notices.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 import { decideLocationAttach, LocationAttachDecision } from './location-attach';
@@ -143,6 +144,7 @@ export class OrdersService {
     private readonly notifications: NotificationsOutService,
     private readonly cashRegister: CashRegisterService,
     private readonly qrPayments: QrPaymentsService,
+    private readonly deliveryNotices: DeliveryNoticesService,
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
@@ -1187,39 +1189,40 @@ export class OrdersService {
     // En un split con la pata QR todavía pendiente, no hay nada "confirmado"
     // que avisarle a nadie todavía — recién cuando decide() complete la otra
     // pata se dispara el aviso de pago aceptado (payment-attempts.service.ts).
-    if (fullyPaid) {
-      try {
-        if (updated.delivery_type === 'delivery') {
-          await this.notifications.notifyNow({
-            channel: 'telegram',
-            kind: 'cash_confirmed_delivery_notice',
-            targetRef: updated.id,
-            payload: {
-              chatRef: 'delivery-group',
-              text: `Pedido ${updated.order_number} confirmado en efectivo.`,
-            },
-          });
-        }
-        if (updated.customer_id) {
-          await this.notifications.notifyNow({
-            channel: 'whatsapp',
-            kind: 'cash_confirmed_customer_notice',
-            targetRef: updated.id,
-            payload: {
-              customerId: updated.customer_id,
-              text: `Tu pago en efectivo para el pedido ${updated.order_number} fue confirmado.`,
-            },
-          });
-        }
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo notificar cash confirm para ${updated.id}: ${(error as Error).message}`,
-        );
-      }
-    }
+    await this.notifyCashPaymentFinalized(updated, fullyPaid);
 
     const { items, promotions } = await loadOrderLines(this.db, updated.id);
     return toOrderResponse(updated, items, promotions);
+  }
+
+  private async notifyCashPaymentFinalized(
+    order: { id: string; order_number: string; customer_id: string | null },
+    fullyPaid: boolean,
+  ): Promise<void> {
+    if (!fullyPaid) return;
+    try {
+      if (order.customer_id) {
+        await this.notifications.notifyNow({
+          channel: 'whatsapp',
+          kind: 'cash_confirmed_customer_notice',
+          targetRef: order.id,
+          payload: {
+            customerId: order.customer_id,
+            text: `Tu pago en efectivo para el pedido ${order.order_number} fue confirmado.`,
+          },
+        });
+      }
+    } catch {
+      this.logger.warn(`cash_confirmation_notification_failed orderId=${order.id}`);
+    }
+
+    // La decisión de caja ya fue confirmada en DB. El aviso al grupo es
+    // best-effort y vuelve a validar delivery+quote+pago dentro del servicio.
+    try {
+      await this.deliveryNotices.notifyConfirmed(order.id);
+    } catch {
+      this.logger.warn(`delivery_notice_notification_failed orderId=${order.id}`);
+    }
   }
 
   /**
