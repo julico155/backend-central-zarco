@@ -2,12 +2,16 @@ import { Kysely } from 'kysely';
 import { PaymentAttemptsService } from '../src/payment-attempts/payment-attempts.service';
 import { NotificationsOutService } from '../src/notifications-out/notifications-out.service';
 import { CashRegisterService } from '../src/cash-register/cash-register.service';
+import { DeliveryNoticesService } from '../src/delivery-notices/delivery-notices.service';
 import { Database } from '../src/database/types';
 import { createTestDb, describeIfDb } from './utils/test-db';
 
 /** Los pedidos de este fixture no tienen customer_id, así que el aviso
  * best-effort nunca se dispara — un stub basta. */
 const noopNotifications = { notifyNow: async () => undefined } as unknown as NotificationsOutService;
+const noopDeliveryNotices = {
+  notifyConfirmed: async () => undefined,
+} as unknown as DeliveryNoticesService;
 
 /**
  * Invariantes 5 y 6 del plan:
@@ -32,7 +36,12 @@ describeIfDb('PaymentAttemptsService.decide (integración, concurrencia)', () =>
 
   beforeAll(async () => {
     db = createTestDb();
-    service = new PaymentAttemptsService(db, noopNotifications, new CashRegisterService(db));
+    service = new PaymentAttemptsService(
+      db,
+      noopNotifications,
+      new CashRegisterService(db),
+      noopDeliveryNotices,
+    );
 
     const existingOpen = await db
       .selectFrom('cash_register_sessions')
