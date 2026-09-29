@@ -278,8 +278,23 @@ export class OrdersService {
 
     // Delivery espera ubicación/cotización antes de cobrar (ver
     // sendQrConfirmationIfDue): recién cuando el pedido pasa a 'confirmed'
-    // con el total ya congelado se manda el QR.
-    if (order.status !== 'awaiting_location') {
+    // con el total ya congelado se manda el QR. Mientras tanto, le pedimos la
+    // ubicación de una — el agente la traduce a texto plano, no a un pin ni
+    // un botón interactivo (ver docs/gateway-integration.md).
+    if (order.status === 'awaiting_location') {
+      try {
+        await this.notifications.notifyNow({
+          channel: 'whatsapp',
+          kind: 'location_request',
+          targetRef: order.id,
+          payload: { customerId: order.customerId, reason: 'delivery_location' },
+        });
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo notificar location_request para ${order.id}: ${(error as Error).message}`,
+        );
+      }
+    } else {
       await this.sendQrConfirmation(order);
     }
   }

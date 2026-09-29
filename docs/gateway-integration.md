@@ -94,8 +94,17 @@ Respuestas posibles:
 
 ### 2.4 Delivery: pedir y adjuntar ubicación
 
+Al crear un pedido de delivery, apenas queda en `awaiting_location` el
+backend manda solo, como dos mensajes salientes normales seguidos: primero
+`order_received` y después `location_request` (sección 3.2) — **no hace
+falta que el agente lo pida**. El mensaje es texto plano, no un pin ni un
+botón interactivo: convertilo a algo como *"Por favor comparte tu ubicación
+actual para coordinar el delivery. Toca el clip 📎 → Ubicación → ENVIAR
+UBICACIÓN ACTUAL"*. Un reintento de creación con el mismo
+`Idempotency-Key` no vuelve a mandarlo (solo pasa en la creación real).
+
 ```
-POST /orders/:id/location-request     // le pide la ubicación al cliente (dispara aviso de WhatsApp)
+POST /orders/:id/location-request     // reenvío manual, por si hace falta pedirla de nuevo
 POST /orders/:id/location
 { "latitude": -16.5, "longitude": -68.15 }
 ```
