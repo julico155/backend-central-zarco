@@ -123,5 +123,5 @@ export default (): AppConfig => ({
   deliveryNearbyRadiusMeters:
     Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) > 0 ? Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) : 500,
   unpaidOrderTtlMinutes:
-    Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 10,
+    Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 20,
 });

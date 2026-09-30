@@ -5,10 +5,10 @@
  * cron aplica el pago solo y nadie se entera. Pasado el margen se asume que
  * la jornada terminó de verdad, y ahí sí hay que avisar a una persona.
  *
- * 10 minutos, el mismo margen que ya usa `late_order_requests` para decidir
+ * 20 minutos, el mismo margen que ya usa `late_order_requests` para decidir
  * que nadie va a atender un pedido fuera de horario.
  */
-export const UNAPPLIED_PAYMENT_GRACE_MS = 10 * 60 * 1000;
+export const UNAPPLIED_PAYMENT_GRACE_MS = 20 * 60 * 1000;
 
 export type UnappliedPaymentAction = 'retry_later' | 'escalate';
 

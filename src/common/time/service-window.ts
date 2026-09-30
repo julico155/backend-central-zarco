@@ -103,7 +103,7 @@ export function startOfBoliviaDay(date: string): Date {
   return new Date(`${date}T00:00:00-04:00`);
 }
 
-export const LATE_REQUEST_TTL_MS = 10 * 60 * 1000; // 10 minutos, igual que el proyecto viejo
+export const LATE_REQUEST_TTL_MS = 20 * 60 * 1000; // 20 minutos, alineado con unpaidOrderTtlMinutes
 
 export function lateRequestExpiryFor(instant: Date): Date {
   return new Date(instant.getTime() + LATE_REQUEST_TTL_MS);

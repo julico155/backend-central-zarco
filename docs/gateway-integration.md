@@ -86,7 +86,7 @@ sumá la cantidad en una sola línea.
 
 Respuestas posibles:
 - **200/201** — pedido creado. `200` si repetiste la misma `Idempotency-Key` con el mismo cuerpo (no se duplicó, te devuelve el mismo pedido de antes).
-- **202** — el pedido queda pendiente de que un humano lo acepte (`late_order_request`). Pasa cada vez que no hay staff con la caja abierta en ese momento — puede ser tarde en la noche, pero también temprano si todavía no abrieron, o si cerraron antes de lo habitual esa noche en particular (el horario real varía). Avísale al cliente que su pedido está "en revisión", nunca que está confirmado — vence solo a los 10 minutos si nadie lo revisa.
+- **202** — el pedido queda pendiente de que un humano lo acepte (`late_order_request`). Pasa cada vez que no hay staff con la caja abierta en ese momento — puede ser tarde en la noche, pero también temprano si todavía no abrieron, o si cerraron antes de lo habitual esa noche en particular (el horario real varía). Avísale al cliente que su pedido está "en revisión", nunca que está confirmado — vence solo a los 20 minutos si nadie lo revisa.
 - **409 `closed`** — fuera de cualquier horario plausible del local (ej. de madrugada/mañana), no se puede pedir.
 - **409 `product_unavailable`** / **`promotion_unavailable`** — algo del carrito ya no está disponible; el `details` trae qué producto/promo fue.
 
@@ -139,7 +139,7 @@ responde 200 con `result`:
 
 | `result` | Cuándo | Extra |
 |---|---|---|
-| `attached` | 1 pedido delivery esperando ubicación (`awaiting_location`, dentro del TTL de 10 min): se guarda y se cotiza | `orderId`, `orderNumber`, `quote` |
+| `attached` | 1 pedido delivery esperando ubicación (`awaiting_location`, dentro del TTL de 20 min): se guarda y se cotiza | `orderId`, `orderNumber`, `quote` |
 | `already_attached` | el pedido que espera ubicación ya tiene esa misma ubicación (tolerancia ~5 m) | `orderId`, `orderNumber` |
 | `location_conflict` | el pedido que espera ubicación está en `pending_manual` y llega una ubicación distinta: **no se modifica nada** | `orders[]` |
 | `ambiguous_order` | 2 o más pedidos esperando ubicación: no elige ninguno | `orders[]` (`id`, `orderNumber`, `totalAmount`) |
@@ -169,7 +169,7 @@ rango automático (montos `null`).
 
 **Reglas de pago de WhatsApp**: todos los pedidos (delivery, pickup y mesa)
 se pagan **solo por QR** — no hay efectivo ni tarjeta por este canal. Un
-pedido que no se paga en **10 minutos** se cancela solo (se anula su QR en el
+pedido que no se paga en **20 minutos** se cancela solo (se anula su QR en el
 banco y le llega al cliente un mensaje saliente normal avisándole que el
 pedido fue cancelado y que puede hacer uno nuevo). Además, el token del
 agente ya **no** puede confirmar ni cancelar cobros en efectivo
@@ -340,7 +340,7 @@ devolvé cualquier string único y estable para ese envío.
 | `payment_proof_request` | El banco falló al generar el QR real: fallback, se pide pagar y mandar captura | `{ orderNumber, qrAmount }` |
 | `payment_confirmed` | Pago aceptado (QR o efectivo). `fullyPaid: false` solo en un `split` cuando la pata QR entró pero la pata efectivo todavía no | `{ orderNumber, deliveryType, fullyPaid }` |
 | `payment_rejected` | El comprobante/pago fue rechazado | `{ orderNumber, deliveryType }` |
-| `order_expired_unpaid` | El pedido se cancela solo por no pagarse en el TTL (10 min) | `{ orderNumber }` |
+| `order_expired_unpaid` | El pedido se cancela solo por no pagarse en el TTL (20 min) | `{ orderNumber }` |
 | `late_request_unavailable` | Solicitud fuera de horario aceptada por staff, pero el carrito ya no está disponible (producto/promo caídos) | `{ requestNumber }` |
 | `late_request_accepted` | Solicitud fuera de horario aceptada, pedido creado | `{ requestNumber, orderId }` |
 | `late_request_rejected` | Solicitud fuera de horario rechazada por staff | `{ requestNumber }` |
