@@ -358,15 +358,20 @@ export class QrPaymentsService {
 
   /** Cobro cobrado que definitivamente no se puede aplicar — paid_unapplied + alerta a staff, CAS para no duplicar. */
   private async escalateUnapplied(
-    charge: { id: string; order_id: string; amount: string },
+    charge: { id: string; order_id: string; amount: string; paid_detected_at: Date | null },
     rawStatus: unknown,
     now: Date,
     reasonText: string,
   ): Promise<void> {
+    // El banco ya reportó este cobro como pagado — paid_detected_at marca
+    // ESE momento, no el del escalamiento. Si ya tenía uno (p.ej. vino del
+    // margen de gracia de caja cerrada) no se pisa; si es la primera vez que
+    // lo vemos (escalamiento directo por order_not_payable) se setea ahora.
     const escalated = await this.db
       .updateTable('bank_qr_charges')
       .set({
         status: 'paid_unapplied',
+        paid_detected_at: charge.paid_detected_at ?? now,
         raw_status_response: JSON.stringify(rawStatus),
         updated_at: now,
       })

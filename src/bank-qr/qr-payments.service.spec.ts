@@ -68,9 +68,31 @@ describe('QrPaymentsService.resolveCharge vs a payment_attempt that cannot apply
     expect(bankQrChargesUpdate.set).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'paid_unapplied' }),
     );
+    // El banco reportó el pago justo ahora (pendingCharge.paid_detected_at es null) —
+    // el escalamiento directo debe setearlo, nunca dejarlo null.
+    const setCall = bankQrChargesUpdate.set.mock.calls[0][0] as { paid_detected_at?: Date };
+    expect(setCall.paid_detected_at).toBeInstanceOf(Date);
     expect(notifications.notifyNow).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'qr_paid_unapplied_alert' }),
     );
+  });
+
+  it('never overwrites an existing paid_detected_at when escalating (order_not_payable after a prior grace-period tick)', async () => {
+    const existingDetectedAt = new Date('2026-09-29T12:00:00.000Z');
+    const bankQrChargesUpdate = chain({ id: 'charge-1' });
+    const decide = jest.fn().mockRejectedValue(
+      new DomainException('order_not_payable', 409, 'El pedido ya fue cancelado.'),
+    );
+    const { service } = createService({
+      chargeChain: chain({ ...pendingCharge, paid_detected_at: existingDetectedAt }),
+      bankQrChargesUpdate,
+      decide,
+    });
+
+    await service.resolveCharge('qr-1');
+
+    const setCall = bankQrChargesUpdate.set.mock.calls[0][0] as { paid_detected_at?: Date };
+    expect(setCall.paid_detected_at).toEqual(existingDetectedAt);
   });
 
   it('still uses the cash_register_closed grace-period path for that specific failure (unchanged)', async () => {
