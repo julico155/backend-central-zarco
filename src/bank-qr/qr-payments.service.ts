@@ -10,6 +10,7 @@ import { BanecoClientService } from '../baneco/baneco-client.service';
 import { PaymentAttemptsService } from '../payment-attempts/payment-attempts.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { decideUnappliedPayment } from './unapplied-payment';
+import { withAmountCaption } from './qr-image-caption';
 
 export interface QrChargeResponse {
   orderId: string;
@@ -182,12 +183,26 @@ export class QrPaymentsService {
   async getQrImage(orderId: string): Promise<{ bytes: Buffer; mimeType: string }> {
     const charge = await this.db
       .selectFrom('bank_qr_charges')
-      .select('qr_image_base64')
-      .where('order_id', '=', orderId)
-      .orderBy('created_at', 'desc')
+      .innerJoin('orders', 'orders.id', 'bank_qr_charges.order_id')
+      .select(['bank_qr_charges.qr_image_base64', 'bank_qr_charges.amount', 'orders.order_number'])
+      .where('bank_qr_charges.order_id', '=', orderId)
+      .orderBy('bank_qr_charges.created_at', 'desc')
       .executeTakeFirst();
     if (!charge) throw new NotFoundDomainError('bank_qr_charge', orderId);
-    return { bytes: Buffer.from(charge.qr_image_base64, 'base64'), mimeType: 'image/png' };
+    try {
+      const bytes = await withAmountCaption({
+        qrImageBase64: charge.qr_image_base64,
+        amountBs: Number(charge.amount),
+        concept: `Pedido ${charge.order_number}`,
+      });
+      return { bytes, mimeType: 'image/png' };
+    } catch (error) {
+      // El QR original del banco sigue siendo válido y escaneable sin la
+      // leyenda — mejor mandar eso que fallar el cobro por un problema de
+      // renderizado.
+      this.logger.warn(`No se pudo componer la leyenda del QR para ${orderId}: ${(error as Error).message}`);
+      return { bytes: Buffer.from(charge.qr_image_base64, 'base64'), mimeType: 'image/png' };
+    }
   }
 
   /** Re-verifica un qrId puntual contra el banco y resuelve si corresponde. Usado por el cron y por el webhook. */
