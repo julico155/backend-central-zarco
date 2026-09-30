@@ -326,6 +326,31 @@ describe('OrderReplacementService.createReplacement', () => {
     expect(orders.notifyOrderCreated).toHaveBeenCalled();
   });
 
+  it('reports stale_order (not not_found) when a concurrent replacement committed between the locked check and now', async () => {
+    // Contra Postgres real: el SELECT ... FOR UPDATE de la transacción
+    // perdedora se bloquea en la fila vieja; cuando la ganadora comitea
+    // (fila ahora 'cancelled'), Postgres re-evalúa SOLO esa fila puntual
+    // (EvalPlanQual) y la descarta — sin volver a escanear la tabla, así que
+    // el primer SELECT nunca ve el pedido nuevo recién creado. Acá se
+    // simula exactamente eso: el primer executeTakeFirst (locked) no
+    // encuentra nada, el segundo (sin lock, nuevo snapshot en READ
+    // COMMITTED) sí encuentra el pedido que el ganador acaba de crear.
+    const newActiveOrder = { id: 'order-9', customer_id: 'customer-1', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null };
+    const ordersChain = chain(undefined);
+    ordersChain.executeTakeFirst = jest
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(newActiveOrder);
+    const { service, orders } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({ customers: chain(customer), orders: ordersChain }),
+    });
+
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    expect(result).toEqual({ httpStatus: 409, body: { result: 'stale_order', currentOrderId: 'order-9' } });
+    expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
+  });
+
   it('does not reuse location when switching delivery -> pickup', async () => {
     const oldOrder = {
       id: 'order-1',

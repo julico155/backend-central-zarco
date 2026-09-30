@@ -230,7 +230,18 @@ export class OrderReplacementService {
     // distinto (POS) nunca puede ser el objetivo de un reemplazo: en el
     // peor caso da stale_order, nunca toca la fila que el cliente pidió.
     const old = await this.findActiveOrder(trx, customer.id, { forUpdate: true });
-    if (!old) return { result: 'not_found' };
+    if (!old) {
+      // No es necesariamente "no tiene pedido": si un replacement concurrente
+      // ganó la carrera y ya comiteó, el SELECT ... FOR UPDATE de arriba se
+      // bloqueó en la fila vieja y, al desbloquear, Postgres sólo re-evalúa
+      // ESA fila puntual (EvalPlanQual) — no vuelve a escanear la tabla, así
+      // que nunca ve el pedido nuevo que el ganador acaba de crear. En READ
+      // COMMITTED cada sentencia toma su propio snapshot, así que una
+      // segunda consulta (sin lock) acá sí lo encuentra si ya existe.
+      const maybeNowActive = await this.findActiveOrder(trx, customer.id);
+      if (maybeNowActive) return { result: 'stale_order', currentOrderId: maybeNowActive.id };
+      return { result: 'not_found' };
+    }
     if (old.id !== dto.orderId) return { result: 'stale_order', currentOrderId: old.id };
 
     const check = checkReplaceable(
