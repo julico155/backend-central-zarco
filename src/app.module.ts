@@ -21,6 +21,7 @@ import { CashRegisterModule } from './cash-register/cash-register.module';
 import { ReportsModule } from './reports/reports.module';
 import { DeliveryDriversModule } from './delivery-drivers/delivery-drivers.module';
 import { AgentLocationsModule } from './agent-locations/agent-locations.module';
+import { OrderReplacementModule } from './order-replacement/order-replacement.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AgentLocationsModule } from './agent-locations/agent-locations.module';
     ReportsModule,
     DeliveryDriversModule,
     AgentLocationsModule,
+    OrderReplacementModule,
   ],
 })
 export class AppModule {}

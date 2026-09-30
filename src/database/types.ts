@@ -121,6 +121,10 @@ export interface OrdersTable {
   delivered_at: Timestamp | null;
   /** Caja (turno) donde se confirmó el pago — null hasta que se cobra (o al aceptarse, si fue fuera de horario). */
   register_session_id: string | null;
+  /** FASE 3 (replace-not-mutate): este pedido reemplaza a ese otro — nunca se editan líneas de un pedido existente. */
+  replaces_order_id: string | null;
+  /** Inverso de replaces_order_id — null hasta que alguien lo reemplaza; un pedido solo se reemplaza una vez (índice único parcial). */
+  replaced_by_order_id: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

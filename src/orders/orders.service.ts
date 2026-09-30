@@ -263,7 +263,8 @@ export class OrdersService {
     return { httpStatus: outcome.created ? 201 : 200, body: outcome.body };
   }
 
-  private async notifyOrderCreated(order: OrderResponse): Promise<void> {
+  /** Público: también lo dispara `OrderReplacementService` tras crear el pedido de reemplazo. */
+  async notifyOrderCreated(order: OrderResponse): Promise<void> {
     if (!order.customerId) return;
 
     // Delivery: UNA sola solicitud (reason + orderNumber) — Central solo

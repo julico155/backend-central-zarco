@@ -225,6 +225,74 @@ que el agente haga nada más).
 GET /orders/:id
 ```
 
+### 2.7 Modificar mi pedido (replace-not-mutate)
+
+Nunca se editan las líneas de un pedido existente: uno nuevo reemplaza al
+viejo. Central resuelve todo por `customerPhone` — vos nunca decidís cuál es
+el pedido activo, si está pagado, ni precios/promos/delivery: eso lo
+revalida Central de nuevo en cada llamada, incluso si ya te lo dijo hace un
+minuto (puede haber cambiado, por ejemplo si el banco confirmó el pago
+mientras el cliente armaba el carrito nuevo).
+
+**Resolver si hay algo para modificar:**
+```
+GET /internal/agent/orders/replaceable?customerPhone=+59170001234
+→ 200 { "result": "no_order" }
+  | { "result": "not_replaceable", "reasonCode": "already_paid" | "payment_in_progress" | "operational" }
+  | { "result": "replaceable", "orderId", "orderNumber", "status", "deliveryType",
+      "hasLocation": true,
+      "cart": { "deliveryType", "items": [{productId, quantity, excludedComplements}],
+                "promotions": [{promotionId, quantity}] } }
+```
+`cart` trae solo identificadores y cantidades — nunca precios como
+autoridad, son solo para precargar el menú. `not_replaceable` con
+`already_paid`/`payment_in_progress`: hacé handoff humano y silencio
+automático, no ofrezcas modificar. `no_order`: menú normal, no hay nada que
+reemplazar.
+
+**Agregar una preferencia simple ("sin cebolla") sin tocar el carrito:**
+```
+POST /internal/agent/orders/notes
+Idempotency-Key: <sourceMessageId>
+{ "customerPhone": "...", "note": "sin cebolla", "sourceMessageId": "wamid..." }
+→ 200 { "result": "saved" | "no_order" | "not_allowed" }
+```
+Se acumula sobre `orders.notes` del último pedido activo (nunca un
+`orderId` que vos elijas). `not_allowed` = hay un pedido activo pero ya no
+es modificable (pagado, en curso) — no lo conviertas en nota, hacé handoff.
+Central **no** manda ninguna confirmación automática al cliente por esto.
+
+**Confirmar el carrito modificado:**
+```
+POST /internal/agent/orders/replacements
+Idempotency-Key: <uuid nuevo por intento real>
+{
+  "customerPhone": "...",
+  "orderId": "...",              // el que te dio replaceable — Central igual revalida ownership + estado
+  "customerName": "Juan Pérez",
+  "deliveryType": "delivery",
+  "paymentMethod": "qr",         // solo qr, igual que 2.3
+  "notes": "sin cebolla",        // opcional — NUNCA se hereda del pedido viejo, es texto nuevo
+  "items": [...], "promotions": [...]
+}
+→ 201 { "result": "replaced", "orderId": "<pedido nuevo>", "replacedOrderId": "<pedido viejo>" }
+  | 404 { "code": "not_found", ... }
+  | 409 { "code": "order_customer_mismatch", ... }   // el orderId no es del cliente resuelto por el teléfono
+  | 409 { "code": "not_replaceable", "details": { "reasonCode": "..." } }
+```
+El pedido nuevo se crea con la misma lógica autoritativa que `POST /orders`
+(revalida catálogo, precios, promos) y dispara los mismos avisos
+(`order_received`/`location_request`/QR — ver 2.4/2.5). Si el pedido viejo
+era delivery y el nuevo sigue siendo delivery, Central reusa la ubicación
+guardada (nunca la tarifa: se recotiza entera) — no hace falta volver a
+pedir el pin. Si cambia a `pickup`, o si no había ubicación previa, sigue el
+flujo normal de `location_request`.
+
+⚠️ **Riesgo conocido, por decisión de producto**: el QR bancario del pedido
+viejo NO se cancela automáticamente — sigue siendo técnicamente cobrable
+hasta que expire solo. Si alguien lo paga después de reemplazado, cae en la
+cola de "pagos sin aplicar" para que el staff lo resuelva a mano.
+
 ## 3. Lo que el agente debe exponer (el backend te llama a vos)
 
 Estos 3 endpoints son responsabilidad del agente. El backend reintenta
