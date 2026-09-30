@@ -2,16 +2,65 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
 
-export interface WhatsappMessagePayload {
-  customerId: string;
-  /** Legacy: texto ya armado por Central. Se mantiene por compatibilidad — el
-   * flujo nuevo (ver messageType) no lo usa, el agente arma el copy. */
-  text?: string;
-  imageUrl?: string;
-  /** Intención estructurada: Central decide QUÉ pasó, el agente decide CÓMO decirlo. */
-  messageType?: 'payment_confirmed' | 'payment_rejected';
-  context?: { deliveryType?: 'delivery' | 'pickup' | 'dine_in' };
+export type OrderDeliveryTypeContext = 'delivery' | 'pickup' | 'dine_in';
+
+export interface CustomerMessageOrderItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  excludedComplements: string[];
 }
+
+export interface CustomerMessageComboItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  components: { name: string; quantity: number }[];
+}
+
+/**
+ * Central decide QUÉ pasó y entrega datos crudos; el agente decide CÓMO
+ * comunicarlo (copy, emojis, formato) — Central nunca manda texto
+ * customer-facing. Cada `messageType` fija su propio `context`.
+ */
+export type CustomerMessageIntent =
+  | { messageType: 'order_received'; context: { orderNumber: string; deliveryType: OrderDeliveryTypeContext } }
+  | {
+      messageType: 'qr_confirmation';
+      imageUrl: string;
+      context: {
+        orderNumber: string;
+        currency: 'BOB';
+        deliveryType: OrderDeliveryTypeContext;
+        items: CustomerMessageOrderItem[];
+        promotions: CustomerMessageComboItem[];
+        subtotalAmount: number;
+        deliveryBaseAmount: number;
+        deliverySurchargeAmount: number;
+        deliveryAmount: number;
+        totalAmount: number;
+        /** Monto autoritativo cobrado por ESTE QR — siempre subtotalAmount, nunca incluye envío. */
+        qrAmount: number;
+      };
+    }
+  | {
+      /** El banco falló al generar el QR real: se le pide al cliente que pague y mande la captura. */
+      messageType: 'payment_proof_request';
+      context: { orderNumber: string; qrAmount: number };
+    }
+  | {
+      messageType: 'payment_confirmed';
+      context: { orderNumber: string; deliveryType: OrderDeliveryTypeContext; fullyPaid: boolean };
+    }
+  | { messageType: 'payment_rejected'; context: { orderNumber: string; deliveryType: OrderDeliveryTypeContext } }
+  | { messageType: 'order_expired_unpaid'; context: { orderNumber: string } }
+  | { messageType: 'late_request_unavailable'; context: { requestNumber: string } }
+  | { messageType: 'late_request_accepted'; context: { requestNumber: string; orderId: string } }
+  | { messageType: 'late_request_rejected'; context: { requestNumber: string } };
+
+export type WhatsappMessagePayload = { customerId: string } & CustomerMessageIntent;
 
 export interface WhatsappLocationRequestPayload {
   customerId: string;

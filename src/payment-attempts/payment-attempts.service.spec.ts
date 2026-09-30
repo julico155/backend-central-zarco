@@ -24,6 +24,7 @@ function createService(scenario: Scenario) {
     payment_method: scenario.paymentMethod ?? 'qr',
     split_cash_confirmed_at: scenario.splitCashConfirmed ? new Date() : null,
     delivery_type: scenario.deliveryType ?? 'delivery',
+    order_number: 'ORD-260929-007',
   };
 
   const attemptsUpdate = {
@@ -150,7 +151,7 @@ describe('PaymentAttemptsService delivery notice trigger', () => {
 });
 
 describe('PaymentAttemptsService payment_decision copy', () => {
-  it('sends a structured payment_confirmed intent with deliveryType when the order becomes fully paid', async () => {
+  it('sends a structured payment_confirmed intent (fullyPaid: true) when the order becomes fully paid', async () => {
     const { service, notifications } = createService({ decision: 'accepted', deliveryType: 'delivery' });
 
     await service.decide('attempt-1', 'accepted');
@@ -162,7 +163,7 @@ describe('PaymentAttemptsService payment_decision copy', () => {
         payload: {
           customerId: 'customer-1',
           messageType: 'payment_confirmed',
-          context: { deliveryType: 'delivery' },
+          context: { orderNumber: 'ORD-260929-007', deliveryType: 'delivery', fullyPaid: true },
         },
       }),
     );
@@ -176,12 +177,12 @@ describe('PaymentAttemptsService payment_decision copy', () => {
 
     expect(notifications.notifyNow).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({ context: { deliveryType: 'pickup' } }),
+        payload: expect.objectContaining({ context: expect.objectContaining({ deliveryType: 'pickup' }) }),
       }),
     );
   });
 
-  it('keeps the legacy text for an accepted QR leg that leaves a split still unpaid', async () => {
+  it('sends payment_confirmed with fullyPaid: false for an accepted QR leg that leaves a split still unpaid', async () => {
     const { service, notifications } = createService({
       decision: 'accepted',
       paymentMethod: 'split',
@@ -193,17 +194,19 @@ describe('PaymentAttemptsService payment_decision copy', () => {
 
     expect(notifications.notifyNow).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          text: 'Tu pago fue confirmado, tu pedido sigue en preparación.',
-        }),
+        payload: {
+          customerId: 'customer-1',
+          messageType: 'payment_confirmed',
+          context: { orderNumber: 'ORD-260929-007', deliveryType: 'delivery', fullyPaid: false },
+        },
       }),
     );
     expect(notifications.notifyNow).not.toHaveBeenCalledWith(
-      expect.objectContaining({ payload: expect.objectContaining({ messageType: expect.anything() }) }),
+      expect.objectContaining({ payload: expect.objectContaining({ text: expect.anything() }) }),
     );
   });
 
-  it('keeps the legacy rejected text untouched', async () => {
+  it('sends a structured payment_rejected intent', async () => {
     const { service, notifications } = createService({ decision: 'rejected' });
 
     await service.decide('attempt-1', 'rejected');
@@ -211,9 +214,11 @@ describe('PaymentAttemptsService payment_decision copy', () => {
 
     expect(notifications.notifyNow).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          text: 'No pudimos validar tu comprobante de pago. Por favor contáctanos para resolverlo.',
-        }),
+        payload: {
+          customerId: 'customer-1',
+          messageType: 'payment_rejected',
+          context: { orderNumber: 'ORD-260929-007', deliveryType: 'delivery' },
+        },
       }),
     );
   });

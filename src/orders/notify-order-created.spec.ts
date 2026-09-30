@@ -85,7 +85,11 @@ describe('OrdersService.notifyOrderCreated', () => {
       channel: 'whatsapp',
       kind: 'order_received',
       targetRef: 'order-1',
-      payload: { customerId: 'customer-1', text: 'Recibimos tu pedido ORD-260929-007.' },
+      payload: {
+        customerId: 'customer-1',
+        messageType: 'order_received',
+        context: { orderNumber: 'ORD-260929-007', deliveryType: 'pickup' },
+      },
     });
     expect(notifications.notifyNow).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'location_request' }),

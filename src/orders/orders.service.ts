@@ -29,9 +29,11 @@ import { DeliveryService, OrderQuoteResponse } from '../delivery/delivery.servic
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
+import type { WhatsappMessagePayload } from '../gateway-client/gateway-client.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 import { decideLocationAttach, LocationAttachDecision } from './location-attach';
+import { buildQrConfirmationContext } from './qr-confirmation-context';
 
 export interface OrderItemResponse {
   productId: string;
@@ -288,7 +290,11 @@ export class OrdersService {
         targetRef: order.id,
         payload: {
           customerId: order.customerId,
-          text: `Recibimos tu pedido ${order.orderNumber}.`,
+          messageType: 'order_received',
+          context: {
+            orderNumber: order.orderNumber,
+            deliveryType: order.deliveryType as 'delivery' | 'pickup' | 'dine_in',
+          },
         },
       });
     } catch (error) {
@@ -313,23 +319,22 @@ export class OrdersService {
     // El external_message_id de ESTE envío es lo que PaymentProofsService
     // usa para "reply_to_qr" (invariante de asociación nivel 1) — se sigue
     // mandando bajo el mismo kind 'qr_confirmation' así ese matching no se
-    // toca, cambia solo el contenido: ahora manda el QR real del banco en
-    // vez de pedir una captura. Si el banco falla, cae al texto de pedir
-    // captura como estaba antes (fallback, no rompe la creación del pedido).
+    // toca. Central solo entrega el desglose (ver buildQrConfirmationContext);
+    // el agente arma el copy. Si el banco falla, cae a payment_proof_request
+    // (fallback, no rompe la creación del pedido) en vez de un QR real.
     const posManualMode =
       order.channel === 'pos' && this.config.get('posQrMode', { infer: true }) === 'manual';
 
     if (order.paymentMethod !== 'qr' || posManualMode) return;
 
-    let payload: { customerId: string; text: string; imageUrl?: string };
+    let payload: WhatsappMessagePayload;
     try {
       const charge = await this.qrPayments.generateForOrder(order.id);
       payload = {
         customerId: order.customerId,
-        // subtotalAmount, no totalAmount: el QR cobra solo la comida —
-        // el envío (si es delivery) se lo paga al repartidor al entregar.
-        text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Escaneá el QR para pagar.`,
+        messageType: 'qr_confirmation',
         imageUrl: charge.qrImageUrl,
+        context: buildQrConfirmationContext(order),
       };
     } catch (error) {
       this.logger.warn(
@@ -337,7 +342,10 @@ export class OrdersService {
       );
       payload = {
         customerId: order.customerId,
-        text: `Tu pedido ${order.orderNumber} es Bs ${order.subtotalAmount.toFixed(2)}. Cuando pagues, responde a este mensaje con la captura.`,
+        // subtotalAmount, no totalAmount: es lo mismo que hubiera cobrado el
+        // QR real — el envío (si es delivery) se paga al repartidor.
+        messageType: 'payment_proof_request',
+        context: { orderNumber: order.orderNumber, qrAmount: order.subtotalAmount },
       };
     }
     try {
@@ -1207,7 +1215,12 @@ export class OrdersService {
   }
 
   private async notifyCashPaymentFinalized(
-    order: { id: string; order_number: string; customer_id: string | null },
+    order: {
+      id: string;
+      order_number: string;
+      customer_id: string | null;
+      delivery_type: OrderDeliveryType;
+    },
     fullyPaid: boolean,
   ): Promise<void> {
     if (!fullyPaid) return;
@@ -1219,14 +1232,14 @@ export class OrdersService {
           targetRef: order.id,
           payload: {
             customerId: order.customer_id,
-            text: `Tu pago en efectivo para el pedido ${order.order_number} fue confirmado.`,
+            messageType: 'payment_confirmed',
+            context: { orderNumber: order.order_number, deliveryType: order.delivery_type, fullyPaid: true },
           },
         });
       }
     } catch {
       this.logger.warn(`cash_confirmation_notification_failed orderId=${order.id}`);
     }
-
   }
 
   /**
@@ -1427,7 +1440,8 @@ export class OrdersService {
             targetRef: order.id,
             payload: {
               customerId: order.customer_id,
-              text: `Cancelamos tu pedido ${order.order_number} porque no recibimos el pago a tiempo. Si todavía lo querés, podés hacer un pedido nuevo.`,
+              messageType: 'order_expired_unpaid',
+              context: { orderNumber: order.order_number },
             },
           });
         }

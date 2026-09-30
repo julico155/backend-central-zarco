@@ -24,8 +24,8 @@ type AcceptOutcome =
   | { outcome: 'repeated'; response: LateOrderRequestResponse }
   | { outcome: 'already_settled'; status: string }
   | { outcome: 'expired' }
-  | { outcome: 'order_unavailable'; reasonCode: string }
-  | { outcome: 'accepted'; response: LateOrderRequestResponse; customerId: string | null };
+  | { outcome: 'order_unavailable'; reasonCode: string; customerId: string | null; requestNumber: string }
+  | { outcome: 'accepted'; response: LateOrderRequestResponse; customerId: string | null; orderId: string };
 
 /**
  * Portado de `decide_late_order_request` / `accept_late_order_request`
@@ -151,7 +151,12 @@ export class LateOrderRequestsService {
           .executeTakeFirstOrThrow();
 
         await sql`release savepoint sp_checkout`.execute(trx);
-        return { outcome: 'accepted', response: toResponse(updated), customerId: req.customer_id };
+        return {
+          outcome: 'accepted',
+          response: toResponse(updated),
+          customerId: req.customer_id,
+          orderId: order.id,
+        };
       } catch (error) {
         if (error instanceof DomainException) {
           await sql`rollback to savepoint sp_checkout`.execute(trx);
@@ -165,7 +170,12 @@ export class LateOrderRequestsService {
             })
             .where('id', '=', id)
             .execute();
-          return { outcome: 'order_unavailable', reasonCode: error.code };
+          return {
+            outcome: 'order_unavailable',
+            reasonCode: error.code,
+            customerId: req.customer_id,
+            requestNumber: req.request_number,
+          };
         }
         throw error; // error inesperado: revierte TODO, incluida la expiración de arriba si aplicara
       }
@@ -189,11 +199,10 @@ export class LateOrderRequestsService {
           'La solicitud venció antes de poder aceptarse.',
         );
       case 'order_unavailable':
-        this.notifyCustomerBestEffort(
-          id,
-          null,
-          'No pudimos confirmar tu pedido, el carrito ya no está disponible.',
-        );
+        this.notifyCustomerBestEffort(id, result.customerId, {
+          messageType: 'late_request_unavailable',
+          context: { requestNumber: result.requestNumber },
+        });
         throw new DomainException(
           'order_unavailable',
           HttpStatus.CONFLICT,
@@ -201,11 +210,10 @@ export class LateOrderRequestsService {
           { reasonCode: result.reasonCode },
         );
       case 'accepted':
-        this.notifyCustomerBestEffort(
-          id,
-          result.customerId,
-          `Tu pedido fue aceptado: ${result.response.orderId}.`,
-        );
+        this.notifyCustomerBestEffort(id, result.customerId, {
+          messageType: 'late_request_accepted',
+          context: { requestNumber: result.response.requestNumber, orderId: result.orderId },
+        });
         return result.response;
     }
   }
@@ -226,11 +234,10 @@ export class LateOrderRequestsService {
       .executeTakeFirst();
 
     if (updated) {
-      this.notifyCustomerBestEffort(
-        id,
-        updated.customer_id,
-        'Tu pedido no pudo confirmarse fuera de horario.',
-      );
+      this.notifyCustomerBestEffort(id, updated.customer_id, {
+        messageType: 'late_request_rejected',
+        context: { requestNumber: updated.request_number },
+      });
       return toResponse(updated);
     }
 
@@ -251,7 +258,10 @@ export class LateOrderRequestsService {
   private notifyCustomerBestEffort(
     requestId: string,
     customerId: string | null,
-    text: string,
+    intent:
+      | { messageType: 'late_request_unavailable'; context: { requestNumber: string } }
+      | { messageType: 'late_request_accepted'; context: { requestNumber: string; orderId: string } }
+      | { messageType: 'late_request_rejected'; context: { requestNumber: string } },
   ): void {
     if (!customerId) return;
     this.notifications
@@ -259,7 +269,7 @@ export class LateOrderRequestsService {
         channel: 'whatsapp',
         kind: 'late_request_decision',
         targetRef: requestId,
-        payload: { customerId, text },
+        payload: { customerId, ...intent },
       })
       .catch((error: Error) =>
         this.logger.warn(`No se pudo notificar desenlace de ${requestId}: ${error.message}`),

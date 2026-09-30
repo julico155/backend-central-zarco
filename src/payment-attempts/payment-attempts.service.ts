@@ -94,6 +94,7 @@ export class PaymentAttemptsService {
         customerId: updated.customer_id ?? effect.customerId,
         paymentPaid: effect.paymentPaid,
         deliveryType: effect.deliveryType,
+        orderNumber: effect.orderNumber,
       };
     });
 
@@ -108,6 +109,7 @@ export class PaymentAttemptsService {
         decision,
         result.paymentPaid,
         result.deliveryType,
+        result.orderNumber,
       );
     }
     return { attempt: result.attempt, won: result.won };
@@ -181,6 +183,7 @@ export class PaymentAttemptsService {
         customerId: order.customer_id ?? effect.customerId,
         paymentPaid: effect.paymentPaid,
         deliveryType: effect.deliveryType,
+        orderNumber: effect.orderNumber,
       };
     });
 
@@ -191,6 +194,7 @@ export class PaymentAttemptsService {
       decision,
       result.paymentPaid,
       result.deliveryType,
+      result.orderNumber,
     );
     return { attempt: result.attempt, won: result.won };
   }
@@ -214,10 +218,15 @@ export class PaymentAttemptsService {
     trx: Transaction<Database>,
     orderId: string,
     decision: 'accepted' | 'rejected',
-  ): Promise<{ customerId: string | null; paymentPaid: boolean; deliveryType: OrderDeliveryType }> {
+  ): Promise<{
+    customerId: string | null;
+    paymentPaid: boolean;
+    deliveryType: OrderDeliveryType;
+    orderNumber: string;
+  }> {
     const current = await trx
       .selectFrom('orders')
-      .select(['register_session_id', 'payment_method', 'split_cash_confirmed_at', 'delivery_type'])
+      .select(['register_session_id', 'payment_method', 'split_cash_confirmed_at', 'delivery_type', 'order_number'])
       .where('id', '=', orderId)
       .executeTakeFirstOrThrow();
 
@@ -229,7 +238,12 @@ export class PaymentAttemptsService {
         .select('customer_id')
         .where('id', '=', orderId)
         .executeTakeFirstOrThrow();
-      return { customerId: order.customer_id, paymentPaid: false, deliveryType: current.delivery_type };
+      return {
+        customerId: order.customer_id,
+        paymentPaid: false,
+        deliveryType: current.delivery_type,
+        orderNumber: current.order_number,
+      };
     }
 
     const fullyPaid = decision === 'accepted' && (!isSplit || current.split_cash_confirmed_at !== null);
@@ -258,16 +272,16 @@ export class PaymentAttemptsService {
       customerId: order.customer_id,
       paymentPaid: paymentStatus === 'paid',
       deliveryType: current.delivery_type,
+      orderNumber: current.order_number,
     };
   }
 
   /**
    * Central decide QUÉ pasó (accepted+paid vs. rejected vs. accepted pero
-   * split todavía incompleto) y manda una intención estructurada
-   * (`messageType` + `context.deliveryType`) — el copy final lo arma el
-   * agente, no acá. Solo el cierre real (accepted && paymentPaid) usa el
-   * mensaje nuevo; el resto conserva el texto legacy tal cual estaba, fuera
-   * de alcance de este cambio.
+   * split todavía incompleto) y manda una intención estructurada — nunca
+   * texto customer-facing. `payment_confirmed` cubre tanto el cierre real
+   * (`fullyPaid: true`) como la pata QR de un split que todavía espera la
+   * pata efectivo (`fullyPaid: false`): el agente decide cómo diferenciarlos.
    */
   private async notifyCustomerBestEffort(
     attemptId: string,
@@ -275,27 +289,27 @@ export class PaymentAttemptsService {
     decision: 'accepted' | 'rejected',
     paymentPaid: boolean,
     deliveryType: OrderDeliveryType,
+    orderNumber: string,
   ): Promise<void> {
     if (!customerId) return;
     try {
-      if (decision === 'accepted' && paymentPaid) {
-        await this.notifications.notifyNow({
-          channel: 'whatsapp',
-          kind: 'payment_decision',
-          targetRef: attemptId,
-          payload: { customerId, messageType: 'payment_confirmed', context: { deliveryType } },
-        });
-        return;
-      }
-      const text =
+      const payload =
         decision === 'accepted'
-          ? 'Tu pago fue confirmado, tu pedido sigue en preparación.'
-          : 'No pudimos validar tu comprobante de pago. Por favor contáctanos para resolverlo.';
+          ? {
+              customerId,
+              messageType: 'payment_confirmed' as const,
+              context: { orderNumber, deliveryType, fullyPaid: paymentPaid },
+            }
+          : {
+              customerId,
+              messageType: 'payment_rejected' as const,
+              context: { orderNumber, deliveryType },
+            };
       await this.notifications.notifyNow({
         channel: 'whatsapp',
         kind: 'payment_decision',
         targetRef: attemptId,
-        payload: { customerId, text },
+        payload,
       });
     } catch {
       this.logger.warn(`payment_decision_notification_failed attemptId=${attemptId}`);
@@ -310,8 +324,9 @@ export class PaymentAttemptsService {
     decision: 'accepted' | 'rejected',
     paymentPaid: boolean,
     deliveryType: OrderDeliveryType,
+    orderNumber: string,
   ): Promise<void> {
-    await this.notifyCustomerBestEffort(attemptId, customerId, decision, paymentPaid, deliveryType);
+    await this.notifyCustomerBestEffort(attemptId, customerId, decision, paymentPaid, deliveryType, orderNumber);
     if (decision === 'accepted' && paymentPaid) {
       await this.notifyDeliveryBestEffort(orderId);
     }

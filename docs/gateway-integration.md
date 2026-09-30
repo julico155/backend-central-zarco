@@ -176,30 +176,26 @@ agente ya **no** puede confirmar ni cancelar cobros en efectivo
 (`cash/confirm` y `cash/cancel` son solo para staff).
 
 Para pedidos con `paymentMethod: "qr"`, el backend genera un QR real del
-banco (por `subtotalAmount`, ver arriba) y te lo manda solo, como un mensaje
-normal (`POST /gateway/whatsapp/messages` con `imageUrl`) — no hace falta que
-el agente pida nada. **El momento en que se manda depende del tipo de
-pedido**: pickup y mesa no esperan nada más, así que el QR sale apenas se
-crea el pedido. Delivery todavía no tiene el total final (falta el envío,
-que se calcula recién con la ubicación) — el QR sale recién cuando el pedido
-pasa de `awaiting_location` a `confirmed` con la cotización aplicada, es
-decir tras `POST /internal/agent/locations/attach` (sección 2.3) con
-resultado `attached` y cotización `applied`. Si la ubicación cae
-`pending_manual` (fuera del techo automático), el QR espera a que un
-`admin`/`cashier` fije el monto a mano; ahí también se manda solo. La
-confirmación del pago es automática (el backend consulta al banco solo);
-cuando se confirma, el agente recibe una intención estructurada —
-`POST /gateway/whatsapp/messages` con `messageType: "payment_confirmed"` y
-`context.deliveryType` (`"delivery" | "pickup" | "dine_in"`), **sin
-`text`** — para que sea el agente quien redacte el mensaje final (copy
-determinístico, sin IA), no Central. Ver sección 3.1 para el texto exacto
-esperado por tipo de pedido.
+banco y te manda solo una intención `messageType: "qr_confirmation"` (ver
+sección 3.1 para el `context` completo, con el desglose de productos,
+subtotal y envío) — no hace falta que el agente pida nada. **El momento en
+que se manda depende del tipo de pedido**: pickup y mesa no esperan nada
+más, así que el QR sale apenas se crea el pedido. Delivery todavía no tiene
+el total final (falta el envío, que se calcula recién con la ubicación) —
+el QR sale recién cuando el pedido pasa de `awaiting_location` a
+`confirmed` con la cotización aplicada, es decir tras
+`POST /internal/agent/locations/attach` (sección 2.3) con resultado
+`attached` y cotización `applied`. Si la ubicación cae `pending_manual`
+(fuera del techo automático), el QR espera a que un `admin`/`cashier` fije
+el monto a mano; ahí también se manda solo. La confirmación del pago es
+automática (el backend consulta al banco solo); cuando se confirma, el
+agente recibe `messageType: "payment_confirmed"` (sección 3.1).
 
-Si por algún motivo el banco falla al generar el QR, el backend cae a pedir
-la captura como antes (mismo mecanismo de `payment-proofs` de abajo) — el
-agente no necesita distinguir un caso del otro, ambos llegan como mensajes
-salientes normales. El monto a comprobar en la foto también es solo la
-comida, nunca el envío.
+Si por algún motivo el banco falla al generar el QR, el backend manda
+`messageType: "payment_proof_request"` en vez del QR — el agente le pide al
+cliente que pague y mande la captura (mismo mecanismo de `payment-proofs`
+de abajo). El monto a comprobar en la foto (`context.qrAmount`) también es
+solo la comida, nunca el envío.
 
 #### Comprobante de pago (fallback si el cliente paga por fuera y manda foto igual)
 
@@ -237,46 +233,70 @@ devolver un error HTTP ante un fallo real (en vez de colgarse) es correcto.
 
 ### 3.1 Enviar mensaje de WhatsApp
 
-Formato legacy — Central ya arma el texto final, lo mandás tal cual:
+**Central nunca manda texto customer-facing.** Todo lo que llega por
+`POST /gateway/whatsapp/messages` es una intención estructurada:
+`{ customerId, messageType, context, imageUrl? }`. El agente decide copy,
+emojis, formato y CTA — Central solo entrega los datos.
 
 ```
 POST /gateway/whatsapp/messages
-{ "customerId": "<uuid>", "text": "Recibimos tu pedido ORD-000123.", "imageUrl": "..." }  // imageUrl opcional
+{ "customerId": "<uuid>", "messageType": "qr_confirmation",
+  "imageUrl": "...", "context": { ... } }
 → 200 { "externalMessageId": "<id del mensaje que devuelve la API de WhatsApp>" }
 ```
-
-Formato nuevo — intención estructurada, **el agente arma el copy** (sin
-`text`, `messageType` en su lugar):
-
-```
-POST /gateway/whatsapp/messages
-{ "customerId": "<uuid>", "messageType": "payment_confirmed",
-  "context": { "deliveryType": "delivery" } }   // "delivery" | "pickup" | "dine_in"
-→ 200 { "externalMessageId": "..." }
-```
-
-Copy exacto esperado por `deliveryType` (determinístico, sin IA):
-
-| `deliveryType` | Texto |
-|---|---|
-| `delivery` | Pago confirmado ✅. Tu pedido está siendo preparado. El delivery tiene tu número y te llamará cuando llegue con tu pedido. |
-| `pickup` | Pago confirmado ✅. Tu pedido está siendo preparado. Te esperamos con el chat en mano cuando vengas a recogerlo. |
-| `dine_in` | Pago confirmado ✅. Tu pedido está siendo preparado. |
-
-`messageType: "payment_rejected"` está reservado en el contrato pero
-Central todavía no lo emite en esta fase — el rechazo sigue llegando como
-`text` legacy.
-
-Ambos formatos conviven: un `payload` puede traer `text`/`imageUrl`
-(legacy), o `messageType`/`context` (nuevo) — nunca mezclados. Soportá los
-dos desde el arranque, porque Central puede empezar a mandar el formato
-nuevo sin previo aviso una vez que ambos lados estén desplegados.
 
 `externalMessageId` es importante: el backend lo guarda y lo usa después
 para reconocer cuándo un cliente **responde directamente** a ese mensaje
 (por ejemplo, para asociar un comprobante al pedido correcto sin
 ambigüedad). Si tu proveedor de WhatsApp no te da un id de mensaje,
 devolvé cualquier string único y estable para ese envío.
+
+`messageType` y su `context`:
+
+| `messageType` | Cuándo | `context` |
+|---|---|---|
+| `order_received` | Pickup/mesa al crear el pedido (delivery no lo recibe, ver `location_request`) | `{ orderNumber, deliveryType }` |
+| `qr_confirmation` | QR real generado con éxito (pickup/mesa al crear; delivery recién tras cotizar) | `{ orderNumber, currency: "BOB", deliveryType, items[], promotions[], subtotalAmount, deliveryBaseAmount, deliverySurchargeAmount, deliveryAmount, totalAmount, qrAmount }` + `imageUrl` |
+| `payment_proof_request` | El banco falló al generar el QR real: fallback, se pide pagar y mandar captura | `{ orderNumber, qrAmount }` |
+| `payment_confirmed` | Pago aceptado (QR o efectivo). `fullyPaid: false` solo en un `split` cuando la pata QR entró pero la pata efectivo todavía no | `{ orderNumber, deliveryType, fullyPaid }` |
+| `payment_rejected` | El comprobante/pago fue rechazado | `{ orderNumber, deliveryType }` |
+| `order_expired_unpaid` | El pedido se cancela solo por no pagarse en el TTL (10 min) | `{ orderNumber }` |
+| `late_request_unavailable` | Solicitud fuera de horario aceptada por staff, pero el carrito ya no está disponible (producto/promo caídos) | `{ requestNumber }` |
+| `late_request_accepted` | Solicitud fuera de horario aceptada, pedido creado | `{ requestNumber, orderId }` |
+| `late_request_rejected` | Solicitud fuera de horario rechazada por staff | `{ requestNumber }` |
+
+**`qr_confirmation.context` en detalle** — Central calcula y entrega todos
+los montos, el agente no recalcula nada:
+
+```
+{
+  "orderNumber": "ORD-260929-007",
+  "currency": "BOB",
+  "deliveryType": "delivery",
+  "items": [
+    { "name": "Trancapecho", "quantity": 1, "unitPrice": 18, "subtotal": 18, "excludedComplements": [] },
+    { "name": "Limonada", "quantity": 1, "unitPrice": 4, "subtotal": 4, "excludedComplements": [] }
+  ],
+  "promotions": [
+    { "name": "Combo Trancapecho", "quantity": 1, "unitPrice": 20, "subtotal": 20,
+      "components": [{ "name": "Trancapecho", "quantity": 1 }, { "name": "Gaseosa", "quantity": 1 }] }
+  ],
+  "subtotalAmount": 22,
+  "deliveryBaseAmount": 8,
+  "deliverySurchargeAmount": 2,
+  "deliveryAmount": 10,
+  "totalAmount": 32,
+  "qrAmount": 22
+}
+```
+
+`qrAmount` es siempre `subtotalAmount` — **el monto autoritativo que cobra
+ESTE QR**, nunca incluye envío. Para pickup/mesa, `deliveryAmount` es `0` y
+`totalAmount === subtotalAmount === qrAmount` (no hay envío que cobrar
+aparte). Para delivery, mostrale al cliente el desglose completo: el envío
+se paga en efectivo al repartidor al momento de la entrega, nunca por QR —
+si solo le mostrás `qrAmount`/`totalAmount` sin aclarar, va a esperar que
+el QR cubra todo y se va a confundir cuando el repartidor le pida el envío.
 
 ### 3.2 Pedir ubicación al cliente
 
