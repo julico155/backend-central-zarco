@@ -26,6 +26,7 @@ const baseOrder: OrderResponse = {
   deliveryAcceptedAt: null,
   deliveredAt: null,
   createdAt: '2026-09-29T00:00:00.000Z',
+  updatedAt: '2026-09-29T00:00:00.000Z',
   items: [],
   promotions: [],
 };

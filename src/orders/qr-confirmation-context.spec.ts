@@ -28,6 +28,7 @@ function baseOrder(overrides: Partial<OrderResponse> = {}): OrderResponse {
     deliveryAcceptedAt: null,
     deliveredAt: null,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     items: [
       {
         productId: 'p1',

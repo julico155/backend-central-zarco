@@ -26,6 +26,7 @@ const cashDelivery = {
   delivery_accepted_at: null,
   delivered_at: null,
   created_at: new Date('2026-09-29T00:00:00.000Z'),
+  updated_at: new Date('2026-09-29T00:00:00.000Z'),
   register_session_id: null,
 };
 

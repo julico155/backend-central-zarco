@@ -82,6 +82,14 @@ export interface OrderResponse {
   deliveryAcceptedAt: string | null;
   deliveredAt: string | null;
   createdAt: string;
+  /**
+   * Última escritura de la fila, no solo cambios de status — también se
+   * toca al agregar una nota (`addNote`), adjuntar ubicación
+   * (`applyLocationLocked`) o armar un split (`setSplitPayment`). Para "hace
+   * cuánto cambió de status" de verdad, usar junto con `statusUpdatedBy`
+   * (ambos se escriben siempre juntos en `updateStatus`) y no solo.
+   */
+  updatedAt: string;
   items: OrderItemResponse[];
   /** Combos vendidos. `items` solo trae los productos sueltos, así que sin esto el ticket y el tablero de cocina quedan incompletos. */
   promotions: OrderPromotionResponse[];
@@ -1528,6 +1536,7 @@ function toOrderResponse(
     delivery_accepted_at: Date | string | null;
     delivered_at: Date | string | null;
     created_at: Date | string;
+    updated_at: Date | string;
   },
   items: {
     product_id: string;
@@ -1579,6 +1588,7 @@ function toOrderResponse(
       : null,
     deliveredAt: order.delivered_at ? new Date(order.delivered_at).toISOString() : null,
     createdAt: new Date(order.created_at).toISOString(),
+    updatedAt: new Date(order.updated_at).toISOString(),
     items: items.map((item) => ({
       productId: item.product_id,
       productCodeSnapshot: item.product_code_snapshot,
