@@ -7,6 +7,8 @@ type Scenario = {
   splitCashConfirmed?: boolean;
   deliveryRejects?: boolean;
   deliveryType?: 'delivery' | 'pickup' | 'dine_in';
+  /** Simula que un replacement (FASE 3) ganó la carrera: el UPDATE final (WHERE status != 'cancelled') no afecta filas. */
+  orderAlreadyCancelled?: boolean;
 };
 
 function createService(scenario: Scenario) {
@@ -43,6 +45,9 @@ function createService(scenario: Scenario) {
   orderUpdate.where.mockReturnValue(orderUpdate);
   orderUpdate.returning.mockReturnValue({
     executeTakeFirstOrThrow: jest.fn().mockResolvedValue({ customer_id: 'customer-1' }),
+    executeTakeFirst: jest.fn().mockResolvedValue(
+      scenario.orderAlreadyCancelled === true ? undefined : { customer_id: 'customer-1' },
+    ),
   });
 
   const orderSelect = { select: jest.fn(), where: jest.fn(), executeTakeFirstOrThrow: jest.fn() };
@@ -221,6 +226,16 @@ describe('PaymentAttemptsService payment_decision copy', () => {
         },
       }),
     );
+  });
+});
+
+describe('PaymentAttemptsService vs a cancelled/replaced order', () => {
+  it('never applies a late payment to an order that a replacement (or anything else) already cancelled', async () => {
+    const { service } = createService({ decision: 'accepted', orderAlreadyCancelled: true });
+
+    await expect(service.decide('attempt-1', 'accepted')).rejects.toMatchObject({
+      code: 'order_not_payable',
+    });
   });
 });
 

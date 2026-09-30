@@ -74,10 +74,11 @@ describe('OrderReplacementService.resolveReplaceable', () => {
 
   it('returns not_replaceable when the active order is already paid', async () => {
     const order = { id: 'order-1', order_number: 'ORD-0001', status: 'confirmed', payment_status: 'paid', delivery_type: 'pickup', delivery_latitude: null, delivery_longitude: null, notes: null };
+    const ordersChain = chain(order);
     const { service } = createService({
       dbSelectFrom: tableRouter({
         customers: chain(customer),
-        orders: chain(order),
+        orders: ordersChain,
         bank_qr_charges: chain([]),
         payment_attempts: chain([]),
       }),
@@ -86,6 +87,8 @@ describe('OrderReplacementService.resolveReplaceable', () => {
       result: 'not_replaceable',
       reasonCode: 'already_paid',
     });
+    // El "último pedido activo" nunca cruza de canal — un pedido POS del mismo cliente no es candidato.
+    expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'whatsapp');
   });
 
   it('returns the cart (ids + quantities, no prices) for a replaceable order', async () => {
@@ -129,11 +132,12 @@ describe('OrderReplacementService.appendNote', () => {
 
   it('returns not_allowed when the active order already has a money signal', async () => {
     const order = { id: 'order-1', status: 'confirmed', payment_status: 'unpaid', notes: null };
+    const ordersChain = chain(order);
     const { service, trx } = createService({
       dbSelectFrom: jest.fn(),
       trxSelectFrom: tableRouter({
         customers: chain(customer),
-        orders: chain(order),
+        orders: ordersChain,
         bank_qr_charges: chain([{ status: 'paid_unapplied', paid_detected_at: new Date() }]),
         payment_attempts: chain([]),
       }),
@@ -143,6 +147,19 @@ describe('OrderReplacementService.appendNote', () => {
       reasonCode: 'payment_in_progress',
     });
     expect(trx.updateTable).not.toHaveBeenCalled();
+    expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'whatsapp');
+  });
+
+  it('never resolves/writes over a POS order even if it is the customer’s most recent (channel filter in the query itself)', async () => {
+    // El mock no simula filtrado real; esto verifica que la query arma el
+    // WHERE channel='whatsapp' — la garantía real la da Postgres al filtrar.
+    const ordersChain = chain(undefined); // "ninguna fila pasa el filtro" (todo lo del cliente es POS)
+    const { service } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({ customers: chain(customer), orders: ordersChain }),
+    });
+    await expect(service.appendNote(dto, 'whatsapp-gateway')).resolves.toEqual({ result: 'no_order' });
+    expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'whatsapp');
   });
 
   it('appends to existing notes and saves', async () => {
@@ -178,21 +195,43 @@ describe('OrderReplacementService.createReplacement', () => {
     promotions: [],
   };
 
-  it('rejects when the resolved customer does not own orderId (never trusts the client-supplied id blindly)', async () => {
-    const oldOrder = { id: 'order-1', customer_id: 'someone-else', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null };
+  it('never looks up dto.orderId directly — resolves the latest active WhatsApp order independently and compares', async () => {
+    // El pedido activo REAL del cliente es "order-2" (más nuevo); el agente
+    // manda un orderId viejo ("order-1", lo que le dio un GET anterior).
+    const currentOrder = { id: 'order-2', customer_id: 'customer-1', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null };
     const { service, orders } = createService({
       dbSelectFrom: jest.fn(),
       trxSelectFrom: tableRouter({
         customers: chain(customer),
-        orders: chain(oldOrder),
+        orders: chain(currentOrder),
         bank_qr_charges: chain([]),
         payment_attempts: chain([]),
       }),
     });
 
     const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
-    expect(result).toEqual({ httpStatus: 409, body: { result: 'order_customer_mismatch' } });
+    expect(result).toEqual({ httpStatus: 409, body: { result: 'stale_order', currentOrderId: 'order-2' } });
     expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('never treats a POS order (same customer, more recent) as the replacement target', async () => {
+    // findActiveOrder filtra channel='whatsapp' en la query; acá simulamos
+    // que "lo único activo" que la query devuelve YA es whatsapp (el POS
+    // quedó afuera del WHERE) — el orderId del dto sigue siendo el correcto.
+    const currentOrder = { id: 'order-1', customer_id: 'customer-1', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null };
+    const ordersChain = chain(currentOrder);
+    const { service } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({
+        customers: chain(customer),
+        orders: ordersChain,
+        bank_qr_charges: chain([]),
+        payment_attempts: chain([]),
+      }),
+    });
+
+    await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'whatsapp');
   });
 
   it('rejects when the order already has a money signal, without cancelling it', async () => {
@@ -211,6 +250,25 @@ describe('OrderReplacementService.createReplacement', () => {
     expect(result).toEqual({ httpStatus: 409, body: { result: 'not_replaceable', reasonCode: 'already_paid' } });
     expect(trx.updateTable).not.toHaveBeenCalled();
     expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a rejected/pending_review payment_status too, not just paid', async () => {
+    const oldOrder = { id: 'order-1', customer_id: 'customer-1', status: 'confirmed', payment_status: 'rejected', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null };
+    const { service } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({
+        customers: chain(customer),
+        orders: chain(oldOrder),
+        bank_qr_charges: chain([]),
+        payment_attempts: chain([]),
+      }),
+    });
+
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    expect(result).toEqual({
+      httpStatus: 409,
+      body: { result: 'not_replaceable', reasonCode: 'payment_status_not_unpaid' },
+    });
   });
 
   it('cancels the old order, creates the new one, links both, reuses location, and notifies after commit', async () => {

@@ -66,6 +66,20 @@ describe('checkReplaceable', () => {
     });
   });
 
+  it('blocks a rejected payment_status (comprobante rechazado), not just paid', () => {
+    expect(checkReplaceable({ status: 'confirmed', paymentStatus: 'rejected' }, noMoney)).toEqual({
+      ok: false,
+      reasonCode: 'payment_status_not_unpaid',
+    });
+  });
+
+  it('blocks an orders.payment_status of pending_review (distinto de payment_attempts.review_status)', () => {
+    expect(checkReplaceable({ status: 'confirmed', paymentStatus: 'pending_review' }, noMoney)).toEqual({
+      ok: false,
+      reasonCode: 'payment_status_not_unpaid',
+    });
+  });
+
   it('blocks on any money signal even if payment_status is still unpaid (paid_unapplied)', () => {
     const money: MoneySignalInput = { chargeStatuses: ['paid_unapplied'], attemptStatuses: [], anyPaidDetectedAt: true };
     expect(checkReplaceable({ status: 'confirmed', paymentStatus: 'unpaid' }, money)).toEqual({

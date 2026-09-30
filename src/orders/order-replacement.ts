@@ -37,7 +37,11 @@ export function hasMoneySignal(input: MoneySignalInput): boolean {
   return false;
 }
 
-export type ReplaceableReasonCode = 'already_paid' | 'payment_in_progress' | 'operational';
+export type ReplaceableReasonCode =
+  | 'already_paid'
+  | 'payment_in_progress'
+  | 'payment_status_not_unpaid'
+  | 'operational';
 
 export type ReplaceableCheckResult = { ok: true } | { ok: false; reasonCode: ReplaceableReasonCode };
 
@@ -46,12 +50,18 @@ export type ReplaceableCheckResult = { ok: true } | { ok: false; reasonCode: Rep
  * Fail-closed: cualquier señal de plata bloquea, sin importar qué diga
  * `status`. Se evalúa siempre de nuevo dentro de la transacción que hace el
  * replacement — nunca se cachea ni se confía en una lectura anterior.
+ *
+ * `payment_status` tiene que ser EXACTAMENTE 'unpaid' — no alcanza con
+ * "!== 'paid'". Un comprobante rechazado (`rejected`) o en revisión manual
+ * (`pending_review`, un campo de `orders`, distinto del `review_status` de
+ * `payment_attempts`) tampoco son terreno neutral para reemplazar.
  */
 export function checkReplaceable(
   order: { status: OrderStatus; paymentStatus: OrderPaymentStatus },
   money: MoneySignalInput,
 ): ReplaceableCheckResult {
   if (order.paymentStatus === 'paid') return { ok: false, reasonCode: 'already_paid' };
+  if (order.paymentStatus !== 'unpaid') return { ok: false, reasonCode: 'payment_status_not_unpaid' };
   if (hasMoneySignal(money)) return { ok: false, reasonCode: 'payment_in_progress' };
   if (isReplaceableStatus(order.status)) return { ok: true };
   return { ok: false, reasonCode: 'operational' };

@@ -305,6 +305,21 @@ export class QrPaymentsService {
     rawStatus: unknown,
     error: unknown,
   ): Promise<void> {
+    // El pedido ya fue cancelado (FASE 3: reemplazado por otro, o vencido) —
+    // no es un fallo transitorio como la caja cerrada, es permanente:
+    // ningún reintento lo va a arreglar. Directo a paid_unapplied, sin
+    // margen de gracia, para que el staff decida (aplicar a mano o
+    // devolver la plata) en vez de que el cron lo reintente para siempre.
+    if (error instanceof DomainException && error.code === 'order_not_payable') {
+      await this.escalateUnapplied(
+        charge,
+        rawStatus,
+        new Date(),
+        'El pedido ya fue cancelado (posiblemente reemplazado por uno nuevo) antes de que el banco confirmara el pago.',
+      );
+      return;
+    }
+
     const isCashRegisterClosed =
       error instanceof DomainException && error.code === 'cash_register_closed';
     if (!isCashRegisterClosed) {
@@ -333,6 +348,21 @@ export class QrPaymentsService {
       return;
     }
 
+    await this.escalateUnapplied(
+      charge,
+      rawStatus,
+      now,
+      'Entró con la caja cerrada: hay que aplicarlo si el local sigue abierto, o devolverle la plata al cliente.',
+    );
+  }
+
+  /** Cobro cobrado que definitivamente no se puede aplicar — paid_unapplied + alerta a staff, CAS para no duplicar. */
+  private async escalateUnapplied(
+    charge: { id: string; order_id: string; amount: string },
+    rawStatus: unknown,
+    now: Date,
+    reasonText: string,
+  ): Promise<void> {
     const escalated = await this.db
       .updateTable('bank_qr_charges')
       .set({
@@ -348,7 +378,7 @@ export class QrPaymentsService {
     if (!escalated) return;
 
     this.logger.error(
-      `Pago cobrado sin aplicar (${qrId}, pedido ${charge.order_id}, Bs ${charge.amount}): requiere decisión manual.`,
+      `Pago cobrado sin aplicar (${charge.id}, pedido ${charge.order_id}, Bs ${charge.amount}): requiere decisión manual.`,
     );
 
     const order = await this.db
@@ -366,9 +396,7 @@ export class QrPaymentsService {
           chatRef: 'staff-group',
           text:
             `Pago QR cobrado SIN aplicar — pedido ${order?.order_number ?? charge.order_id}` +
-            ` (${order?.customer_name ?? 'sin nombre'}), Bs ${charge.amount}.` +
-            ' Entró con la caja cerrada: hay que aplicarlo si el local sigue abierto,' +
-            ' o devolverle la plata al cliente.',
+            ` (${order?.customer_name ?? 'sin nombre'}), Bs ${charge.amount}. ${reasonText}`,
         },
       });
     } catch (notifyError) {

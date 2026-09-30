@@ -238,7 +238,7 @@ mientras el cliente armaba el carrito nuevo).
 ```
 GET /internal/agent/orders/replaceable?customerPhone=+59170001234
 → 200 { "result": "no_order" }
-  | { "result": "not_replaceable", "reasonCode": "already_paid" | "payment_in_progress" | "operational" }
+  | { "result": "not_replaceable", "reasonCode": "already_paid" | "payment_status_not_unpaid" | "payment_in_progress" | "operational" }
   | { "result": "replaceable", "orderId", "orderNumber", "status", "deliveryType",
       "hasLocation": true,
       "cart": { "deliveryType", "items": [{productId, quantity, excludedComplements}],
@@ -268,7 +268,7 @@ POST /internal/agent/orders/replacements
 Idempotency-Key: <uuid nuevo por intento real>
 {
   "customerPhone": "...",
-  "orderId": "...",              // el que te dio replaceable — Central igual revalida ownership + estado
+  "orderId": "...",              // el que te dio replaceable
   "customerName": "Juan Pérez",
   "deliveryType": "delivery",
   "paymentMethod": "qr",         // solo qr, igual que 2.3
@@ -276,10 +276,18 @@ Idempotency-Key: <uuid nuevo por intento real>
   "items": [...], "promotions": [...]
 }
 → 201 { "result": "replaced", "orderId": "<pedido nuevo>", "replacedOrderId": "<pedido viejo>" }
-  | 404 { "code": "not_found", ... }
-  | 409 { "code": "order_customer_mismatch", ... }   // el orderId no es del cliente resuelto por el teléfono
+  | 404 { "code": "not_found", ... }                 // no hay cliente, o no tiene ningún pedido activo de whatsapp
+  | 409 { "code": "stale_order", "details": { "currentOrderId": "..." } }
   | 409 { "code": "not_replaceable", "details": { "reasonCode": "..." } }
 ```
+`orderId` **nunca** se usa para buscar el pedido directamente — Central
+resuelve el último pedido activo de WhatsApp del cliente por su cuenta (por
+`customerPhone`, igual que `replaceable`, e ignorando por completo cualquier
+pedido del POS) y recién ahí compara contra lo que mandaste. Si no
+coinciden —tu `orderId` quedó viejo, o apuntaba a otra cosa— da
+`stale_order` con el id correcto (`currentOrderId`) para que vuelvas a
+consultar `GET replaceable`. Esto es intencional: ni un `orderId` viejo ni
+uno de otro canal pueden disparar un reemplazo.
 El pedido nuevo se crea con la misma lógica autoritativa que `POST /orders`
 (revalida catálogo, precios, promos) y dispara los mismos avisos
 (`order_received`/`location_request`/QR — ver 2.4/2.5). Si el pedido viejo
@@ -290,8 +298,12 @@ flujo normal de `location_request`.
 
 ⚠️ **Riesgo conocido, por decisión de producto**: el QR bancario del pedido
 viejo NO se cancela automáticamente — sigue siendo técnicamente cobrable
-hasta que expire solo. Si alguien lo paga después de reemplazado, cae en la
-cola de "pagos sin aplicar" para que el staff lo resuelva a mano.
+hasta que expire solo. Si alguien lo paga después de reemplazado, Central lo
+detecta (el pedido viejo ya está `cancelled`, el pago nunca se le aplica) y
+lo manda directo a la cola de "pagos sin aplicar" para que el staff lo
+resuelva a mano — **nunca** revive el pedido viejo como pagado ni lo manda a
+cocina/reparto. Garantizado por código (`PaymentAttemptsService` no aplica
+pagos a un pedido `cancelled`) y cubierto por tests.
 
 ## 3. Lo que el agente debe exponer (el backend te llama a vos)
 

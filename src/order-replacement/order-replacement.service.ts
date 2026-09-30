@@ -43,7 +43,8 @@ export type AppendNoteResult =
 export type CreateReplacementResult =
   | { result: 'replaced'; orderId: string; replacedOrderId: string }
   | { result: 'not_found' }
-  | { result: 'order_customer_mismatch' }
+  /** dto.orderId no es el último pedido activo de WhatsApp del cliente — la sesión/CTA quedó vieja. */
+  | { result: 'stale_order'; currentOrderId: string }
   | { result: 'not_replaceable'; reasonCode: ReplaceableReasonCode };
 
 const REPLACEMENT_ENDPOINT = 'POST /internal/agent/orders/replacements';
@@ -222,14 +223,15 @@ export class OrderReplacementService {
       .executeTakeFirst();
     if (!customer) return { result: 'not_found' };
 
-    const old = await trx
-      .selectFrom('orders')
-      .selectAll()
-      .where('id', '=', dto.orderId)
-      .forUpdate()
-      .executeTakeFirst();
+    // Nunca se busca por dto.orderId directamente — se resuelve el último
+    // pedido activo de WHATSAPP del cliente de forma independiente (igual
+    // que resolveReplaceable/appendNote) y recién ahí se compara contra lo
+    // que mandó el agente. Así un orderId viejo, ajeno, o de un canal
+    // distinto (POS) nunca puede ser el objetivo de un reemplazo: en el
+    // peor caso da stale_order, nunca toca la fila que el cliente pidió.
+    const old = await this.findActiveOrder(trx, customer.id, { forUpdate: true });
     if (!old) return { result: 'not_found' };
-    if (old.customer_id !== customer.id) return { result: 'order_customer_mismatch' };
+    if (old.id !== dto.orderId) return { result: 'stale_order', currentOrderId: old.id };
 
     const check = checkReplaceable(
       { status: old.status, paymentStatus: old.payment_status },
@@ -291,6 +293,12 @@ export class OrderReplacementService {
     return { result: 'replaced', orderId: created.id, replacedOrderId: old.id };
   }
 
+  /**
+   * "Último pedido activo" es SIEMPRE del canal whatsapp — un pedido POS del
+   * mismo cliente (mismo customer_id, distinto canal) no es candidato acá
+   * bajo ningún concepto: ni para leerlo, ni para agregarle una nota, ni
+   * para reemplazarlo. Estos 3 métodos comparten esta única resolución.
+   */
   private async findActiveOrder(
     executor: Kysely<Database>,
     customerId: string,
@@ -310,6 +318,7 @@ export class OrderReplacementService {
         'notes',
       ])
       .where('customer_id', '=', customerId)
+      .where('channel', '=', 'whatsapp')
       .where('status', 'not in', ACTIVE_STATUSES_EXCLUDED)
       .orderBy('created_at', 'desc')
       .limit(1);
@@ -376,7 +385,7 @@ function httpStatusForReplacement(result: CreateReplacementResult): number {
       return HttpStatus.CREATED;
     case 'not_found':
       return HttpStatus.NOT_FOUND;
-    case 'order_customer_mismatch':
+    case 'stale_order':
     case 'not_replaceable':
       return HttpStatus.CONFLICT;
   }

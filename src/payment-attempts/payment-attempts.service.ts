@@ -258,6 +258,12 @@ export class PaymentAttemptsService {
       registerSessionId = current.register_session_id ?? (await this.cashRegister.assertOpenSessionId(trx));
     }
 
+    // CAS contra un reemplazo (FASE 3) que ganó la carrera: si el pedido ya
+    // está cancelado, este UPDATE no afecta ninguna fila — Postgres
+    // reevalúa el WHERE contra la versión actual de la fila recién al
+    // conseguir el lock, así que esto es seguro incluso si `current` (el
+    // SELECT de arriba, sin FOR UPDATE) se leyó ANTES de que el replacement
+    // cancelara. Nunca se "revive" un pedido reemplazado como pagado.
     const order = await trx
       .updateTable('orders')
       .set({
@@ -266,8 +272,17 @@ export class PaymentAttemptsService {
         updated_at: new Date(),
       })
       .where('id', '=', orderId)
+      .where('status', '!=', 'cancelled')
       .returning(['customer_id'])
-      .executeTakeFirstOrThrow();
+      .executeTakeFirst();
+    if (!order) {
+      throw new DomainException(
+        'order_not_payable',
+        HttpStatus.CONFLICT,
+        'El pedido ya fue cancelado (posiblemente reemplazado) — no se puede aplicar este pago.',
+        { orderId },
+      );
+    }
     return {
       customerId: order.customer_id,
       paymentPaid: paymentStatus === 'paid',
