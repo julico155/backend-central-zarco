@@ -36,7 +36,7 @@ export class MapboxDistanceService implements DistanceService {
 
   private async fetchDrivingMeters(from: Coordinates, to: Coordinates): Promise<number> {
     const coordinates = `${from.longitude},${from.latitude};${to.longitude},${to.latitude}`;
-    const url = `${MAPBOX_DIRECTIONS_URL}/${coordinates}?alternatives=false&overview=false&access_token=${encodeURIComponent(this.accessToken)}`;
+    const url = `${MAPBOX_DIRECTIONS_URL}/${coordinates}?alternatives=true&overview=false&access_token=${encodeURIComponent(this.accessToken)}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -52,10 +52,14 @@ export class MapboxDistanceService implements DistanceService {
     }
 
     const body = (await response.json()) as MapboxDirectionsResponse;
-    const distance = body.routes?.[0]?.distance;
-    if (typeof distance !== 'number' || !Number.isFinite(distance)) {
+    const distances = (body.routes ?? [])
+      .map((route) => route.distance)
+      .filter((distance): distance is number => typeof distance === 'number' && Number.isFinite(distance));
+    if (distances.length === 0) {
       throw new Error(`respuesta sin ruta válida (code=${body.code})`);
     }
-    return distance;
+    // Mapbox ordena las rutas por tiempo estimado, no por distancia — para
+    // cobrar delivery nos importa el camino más corto, no el más rápido.
+    return Math.min(...distances);
   }
 }
