@@ -182,7 +182,7 @@ simulado:
   el `total_amount` de un split entre efectivo y QR usando
   `split_cash_amount`/`split_qr_amount`, no lo cuenta entero de un lado.
 - **`delivery`** — bandas de tarifa reales portadas de `delivery-tariff-v2`
-  (16 bandas, techo automático 16 km → `pending_manual`, recargo por lluvia
+  (16 bandas, techo automático 18 km → `pending_manual`, recargo por lluvia
   congelado en la misma transacción). Distancia vía `DistanceService`
   intercambiable: `MapboxDistanceService` (Directions API, perfil driving)
   ya implementado y se activa solo con `MAPBOX_ACCESS_TOKEN` en `.env`; sin
