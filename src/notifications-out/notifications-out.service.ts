@@ -2,8 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
-import { GatewayClientService } from '../gateway-client/gateway-client.service';
 import {
+  GatewayCallError,
+  GatewayClientService,
   TelegramAlertPayload,
   WhatsappLocationRequestPayload,
   WhatsappMessagePayload,
@@ -132,23 +133,37 @@ export class NotificationsOutService {
     payload: Record<string, unknown>,
     attemptsAfterClaim: number,
   ): Promise<void> {
+    // notificationId = el id de ESTA fila: es la misma en cada reintento
+    // (fast-path o recovery) de la misma notificación lógica, nunca una
+    // nueva por intento. Se la pasamos al gateway (header + campo, ver
+    // GatewayClientService) para que del otro lado puedan deduplicar.
+    const orderNumber = extractOrderNumberForLog(payload);
     try {
-      const externalMessageId = await this.send(channel, kind, payload);
+      const externalMessageId = await this.send(id, channel, kind, payload);
       await this.db
         .updateTable('notification_jobs')
         .set({ status: 'sent', external_message_id: externalMessageId ?? null })
         .where('id', '=', id)
         .execute();
+      this.logger.log(
+        `notification_job sent id=${id} kind=${kind} channel=${channel} attempt=${attemptsAfterClaim}${orderNumber ? ` orderNumber=${orderNumber}` : ''}`,
+      );
     } catch (error) {
-      this.logger.warn(`Notification job ${id} failed: ${(error as Error).message}`);
+      const gatewayStatus = error instanceof GatewayCallError ? error.status : undefined;
       const backoffMs = Math.min(BASE_BACKOFF_MS * 2 ** (attemptsAfterClaim - 1), MAX_BACKOFF_MS);
+      const nextAttemptAt = new Date(Date.now() + backoffMs);
+      this.logger.warn(
+        `notification_job failed id=${id} kind=${kind} channel=${channel} attempt=${attemptsAfterClaim}` +
+          `${orderNumber ? ` orderNumber=${orderNumber}` : ''} gatewayStatus=${gatewayStatus ?? 'n/a'}` +
+          ` nextAttemptAt=${nextAttemptAt.toISOString()}: ${(error as Error).message}`,
+      );
       await this.db
         .updateTable('notification_jobs')
         .set({
           status: 'failed',
           last_error_code:
             attemptsAfterClaim >= MAX_ATTEMPTS ? 'max_attempts_exceeded' : 'gateway_error',
-          next_attempt_at: new Date(Date.now() + backoffMs),
+          next_attempt_at: nextAttemptAt,
         })
         .where('id', '=', id)
         .execute();
@@ -156,19 +171,43 @@ export class NotificationsOutService {
   }
 
   private async send(
+    notificationId: string,
     channel: string,
     kind: string,
     payload: Record<string, unknown>,
   ): Promise<string | undefined> {
     if (channel === 'telegram') {
-      const result = await this.gateway.sendTelegramAlert(payload as unknown as TelegramAlertPayload);
+      const result = await this.gateway.sendTelegramAlert(
+        payload as unknown as TelegramAlertPayload,
+        notificationId,
+      );
       return result.externalMessageId;
     }
     if (kind === 'location_request') {
-      await this.gateway.requestWhatsappLocation(payload as unknown as WhatsappLocationRequestPayload);
+      await this.gateway.requestWhatsappLocation(
+        payload as unknown as WhatsappLocationRequestPayload,
+        notificationId,
+      );
       return undefined;
     }
-    const result = await this.gateway.sendWhatsappMessage(payload as unknown as WhatsappMessagePayload);
+    const result = await this.gateway.sendWhatsappMessage(
+      payload as unknown as WhatsappMessagePayload,
+      notificationId,
+    );
     return result.externalMessageId;
   }
+}
+
+/**
+ * Solo para logs: nunca el payload completo (puede traer imageUrl de QR,
+ * teléfono, etc.) — únicamente el orderNumber, si el payload lo trae, para
+ * poder correlacionar sin exponer nada sensible.
+ */
+function extractOrderNumberForLog(payload: Record<string, unknown>): string | undefined {
+  if (typeof payload.orderNumber === 'string') return payload.orderNumber;
+  const context = payload.context;
+  if (context && typeof context === 'object' && typeof (context as Record<string, unknown>).orderNumber === 'string') {
+    return (context as Record<string, unknown>).orderNumber as string;
+  }
+  return undefined;
 }

@@ -85,10 +85,26 @@ export interface WhatsappMessageResult {
   externalMessageId: string;
 }
 
+/** Igual mensaje que antes (mismo .message), con el status HTTP adjunto para no tener que parsear texto de log. */
+export class GatewayCallError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'GatewayCallError';
+  }
+}
+
 /**
  * Cliente HTTP hacia el "gateway API" de saas_smarky. El backend central
  * nunca sabe qué es WhatsApp/Kapso/Telegram — solo llama a estos tres
  * endpoints entrantes. Ver sección "API que saas_smarky expone" del plan.
+ *
+ * `notificationId` (opcional, retrocompatible): identidad ESTABLE de
+ * NotificationsOutService (notification_jobs.id) que se repite igual en
+ * cada reintento de la misma notificación lógica — nunca se genera una
+ * nueva por retry. Viaja como header `Idempotency-Key` y como campo en el
+ * body, preparando al gateway para deduplicar del otro lado sin romper el
+ * contrato actual (campo nuevo y opcional; una implementación vieja que lo
+ * ignore sigue funcionando exactamente igual).
  */
 @Injectable()
 export class GatewayClientService {
@@ -96,25 +112,47 @@ export class GatewayClientService {
 
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
 
-  async sendWhatsappMessage(payload: WhatsappMessagePayload): Promise<WhatsappMessageResult> {
-    return this.post<WhatsappMessageResult>('/gateway/whatsapp/messages', payload);
+  async sendWhatsappMessage(
+    payload: WhatsappMessagePayload,
+    notificationId?: string,
+  ): Promise<WhatsappMessageResult> {
+    return this.post<WhatsappMessageResult>(
+      '/gateway/whatsapp/messages',
+      withNotificationId(payload, notificationId),
+      notificationId,
+    );
   }
 
-  async requestWhatsappLocation(payload: WhatsappLocationRequestPayload): Promise<void> {
-    await this.post('/gateway/whatsapp/location-requests', payload);
+  async requestWhatsappLocation(
+    payload: WhatsappLocationRequestPayload,
+    notificationId?: string,
+  ): Promise<void> {
+    await this.post(
+      '/gateway/whatsapp/location-requests',
+      withNotificationId(payload, notificationId),
+      notificationId,
+    );
   }
 
-  async sendTelegramAlert(payload: TelegramAlertPayload): Promise<TelegramAlertResult> {
-    return this.post<TelegramAlertResult>('/gateway/telegram/alerts', payload);
+  async sendTelegramAlert(
+    payload: TelegramAlertPayload,
+    notificationId?: string,
+  ): Promise<TelegramAlertResult> {
+    return this.post<TelegramAlertResult>(
+      '/gateway/telegram/alerts',
+      withNotificationId(payload, notificationId),
+      notificationId,
+    );
   }
 
-  private async post<T = void>(path: string, body: unknown): Promise<T> {
+  private async post<T = void>(path: string, body: unknown, idempotencyKey?: string): Promise<T> {
     const { baseUrl, authToken } = this.config.get('gateway', { infer: true });
     const response = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${authToken}`,
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
       },
       body: JSON.stringify(body),
     });
@@ -124,7 +162,7 @@ export class GatewayClientService {
       this.logger.warn(
         `Gateway call failed: POST ${path} -> ${response.status}${requestId ? ` requestId=${requestId}` : ''}`,
       );
-      throw new Error(`Gateway call failed: POST ${path} -> ${response.status}`);
+      throw new GatewayCallError(`Gateway call failed: POST ${path} -> ${response.status}`, response.status);
     }
 
     if (response.status === 204) {
@@ -132,6 +170,10 @@ export class GatewayClientService {
     }
     return (await response.json()) as T;
   }
+}
+
+function withNotificationId<T extends object>(payload: T, notificationId: string | undefined): T {
+  return notificationId ? { ...payload, notificationId } : payload;
 }
 
 function safeCorrelationId(headers: Headers): string | null {
