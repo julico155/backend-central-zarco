@@ -12,6 +12,8 @@ import { NotificationsOutService } from '../notifications-out/notifications-out.
 import { decideUnappliedPayment } from './unapplied-payment';
 import { withAmountCaption } from './qr-image-caption';
 
+const QR_DUE_DATE_MARGIN_DAYS = 2;
+
 export interface QrChargeResponse {
   orderId: string;
   status: BankQrChargeStatus;
@@ -121,7 +123,10 @@ export class QrPaymentsService {
       if (existingCharge) return toResponse(existingCharge, orderId);
     }
 
-    const dueDate = dateInBolivia(new Date());
+    // El banco anula el QR al cerrar su `dueDate` (día calendario, no hora
+    // exacta) — 2 días de margen para pagos tardíos/manuales, no afecta el
+    // TTL de 20 min del pedido impago (ese corre aparte, en orders.service).
+    const dueDate = dateInBolivia(new Date(Date.now() + QR_DUE_DATE_MARGIN_DAYS * 24 * 60 * 60 * 1000));
     let generated;
     try {
       generated = await this.baneco.generateQR({
