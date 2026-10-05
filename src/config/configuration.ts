@@ -3,6 +3,8 @@ export interface ServiceAuthConfig {
   tokens: Record<string, string>;
 }
 
+import { normalizePhone } from '../customers/normalize-phone';
+
 export interface AppConfig {
   port: number;
   databaseUrl: string;
@@ -52,6 +54,16 @@ export interface AppConfig {
   deliveryAcceptRadiusMeters: number;
   /** Radio (m) entre dos pedidos "disponibles" para reportarlos como cercanos entre sí (nunca se expone su lat/lng cruda antes de aceptar). */
   deliveryNearbyRadiusMeters: number;
+  /**
+   * Teléfonos (normalizados) que saltan el gate de horario SOLO para
+   * channel='web' — para probar el checkout fuera de horario sin abrir al
+   * público. Vacío por defecto (no seteada en Railway) = cero cambio de
+   * comportamiento. No es un flag que mande el cliente: se resuelve contra
+   * el teléfono real del customerId ya existente, server-side.
+   * NUNCA cambia business_opens_hour/closesHour ni el gate de caja abierta
+   * para pago (solo la creación del pedido).
+   */
+  aiTestPhones: string[];
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -74,6 +86,15 @@ function parseCorsOrigins(raw: string | undefined): string[] {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+}
+
+function parseAiTestPhones(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((phone) => phone.trim())
+    .filter(Boolean)
+    .map((phone) => normalizePhone(phone, { assumeInternational: true }));
 }
 
 function requiredEnv(name: 'DATABASE_URL' | 'JWT_SECRET'): string {
@@ -124,4 +145,5 @@ export default (): AppConfig => ({
     Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) > 0 ? Number(process.env.DELIVERY_NEARBY_RADIUS_METERS) : 500,
   unpaidOrderTtlMinutes:
     Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 20,
+  aiTestPhones: parseAiTestPhones(process.env.AI_TEST_PHONES),
 });

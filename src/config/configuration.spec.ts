@@ -31,9 +31,32 @@ describe('configuration', () => {
       expect(() => configuration()).toThrow(`Missing required environment variable: ${name}`);
     });
   }
+
+  describe('aiTestPhones', () => {
+    const originalAiTestPhones = process.env.AI_TEST_PHONES;
+
+    beforeEach(() => {
+      process.env.DATABASE_URL = 'postgresql://configured-for-test';
+      process.env.JWT_SECRET = 'configured-for-test';
+    });
+
+    afterEach(() => restoreEnv('AI_TEST_PHONES', originalAiTestPhones));
+
+    it('is empty by default (unset in Railway = no behavior change)', () => {
+      delete process.env.AI_TEST_PHONES;
+      expect(configuration().aiTestPhones).toEqual([]);
+    });
+
+    it('parses and normalizes a comma-separated list', () => {
+      // normalizePhone con assumeInternational solo agrega el '+' — no inventa
+      // código de país — así que los 3 formatos de entrada deben traerlo ya.
+      process.env.AI_TEST_PHONES = ' +591 700-00001 , 59170000002, +59170000003 ';
+      expect(configuration().aiTestPhones).toEqual(['+59170000001', '+59170000002', '+59170000003']);
+    });
+  });
 });
 
-function restoreEnv(name: 'DATABASE_URL' | 'JWT_SECRET', value: string | undefined) {
+function restoreEnv(name: 'DATABASE_URL' | 'JWT_SECRET' | 'AI_TEST_PHONES', value: string | undefined) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }

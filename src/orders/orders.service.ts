@@ -31,6 +31,7 @@ import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
 import type { WhatsappMessagePayload } from '../gateway-client/gateway-client.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { normalizePhone } from '../customers/normalize-phone';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 import { decideLocationAttach, LocationAttachDecision } from './location-attach';
 import { buildQrConfirmationContext } from './qr-confirmation-context';
@@ -222,6 +223,14 @@ export class OrdersService {
    * producto — POS puede vender fuera del horario de delivery de WhatsApp,
    * y de la caja: el mostrador vende sin necesitar sesión de caja abierta
    * para simplemente CREAR el pedido, aunque cobrarlo sí la va a exigir).
+   *
+   * Para channel='web' existe un segundo bypass, pensado solo para probar
+   * fuera de horario sin abrir al público: NUNCA es un flag que manda el
+   * cliente (sería un hueco de seguridad para cualquier visitante) — se
+   * resuelve server-side contra `AI_TEST_PHONES` (config `aiTestPhones`),
+   * mirando el teléfono real del customerId ya existente. Vacía por
+   * defecto = cero cambio de comportamiento. No toca business_opens_hour/
+   * closesHour ni el gate de caja abierta para pagar.
    */
   async create(
     dto: CreateOrderDto,
@@ -230,7 +239,9 @@ export class OrdersService {
   ): Promise<CreateOrderOutcome> {
     const settings = await this.operationalSettings.getRow();
     const now = new Date();
-    const bypassAllowed = dto.bypassHoursGate === true && dto.channel === 'pos';
+    const bypassAllowed =
+      (dto.bypassHoursGate === true && dto.channel === 'pos') ||
+      (dto.channel === 'web' && (await this.isAiTestCustomer(dto.customerId)));
     const gate = bypassAllowed
       ? ({ gate: 'proceed' } as const)
       : checkoutGateAt(
@@ -269,6 +280,26 @@ export class OrdersService {
     }
 
     return { httpStatus: outcome.created ? 201 : 200, body: outcome.body };
+  }
+
+  /**
+   * Bypass de horario SOLO para pruebas web (ver comentario de `create()`).
+   * Sale `false` de una si no hay allowlist configurada o no vino
+   * customerId — así el camino normal (sin AI_TEST_PHONES seteada) nunca
+   * paga el costo de esta consulta extra.
+   */
+  private async isAiTestCustomer(customerId: string | undefined): Promise<boolean> {
+    const allowlist = this.config.get('aiTestPhones', { infer: true });
+    if (allowlist.length === 0 || !customerId) return false;
+
+    const customer = await this.db
+      .selectFrom('customers')
+      .select('phone')
+      .where('id', '=', customerId)
+      .executeTakeFirst();
+    if (!customer?.phone) return false;
+
+    return allowlist.includes(normalizePhone(customer.phone, { assumeInternational: true }));
   }
 
   /** Público: también lo dispara `OrderReplacementService` tras crear el pedido de reemplazo. */
