@@ -256,6 +256,7 @@ GET /internal/agent/orders/replaceable?customerPhone=+59170001234
 → 200 { "result": "no_order" }
   | { "result": "not_replaceable", "reasonCode": "already_paid" | "payment_status_not_unpaid" | "payment_in_progress" | "operational" }
   | { "result": "replaceable", "orderId", "orderNumber", "status", "deliveryType",
+      "paymentMethod": "qr" | "cash" | "card" | "split",
       "hasLocation": true,
       "cart": { "deliveryType", "items": [{productId, quantity, excludedComplements}],
                 "promotions": [{promotionId, quantity}] } }

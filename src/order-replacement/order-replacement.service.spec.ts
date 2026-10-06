@@ -92,7 +92,7 @@ describe('OrderReplacementService.resolveReplaceable', () => {
   });
 
   it('returns the cart (ids + quantities, no prices) for a replaceable order', async () => {
-    const order = { id: 'order-1', order_number: 'ORD-0001', status: 'awaiting_location', payment_status: 'unpaid', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null, notes: null };
+    const order = { id: 'order-1', order_number: 'ORD-0001', status: 'awaiting_location', payment_status: 'unpaid', payment_method: 'qr', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null, notes: null };
     const items = [{ product_id: 'p1', quantity: 2, excluded_complements: ['quirquiña'] }];
     const promotions = [{ promotion_id: 'promo-1', combo_quantity: 1 }];
     const { service } = createService({
@@ -112,6 +112,7 @@ describe('OrderReplacementService.resolveReplaceable', () => {
       orderNumber: 'ORD-0001',
       status: 'awaiting_location',
       deliveryType: 'delivery',
+      paymentMethod: 'qr',
       hasLocation: false,
       cart: {
         deliveryType: 'delivery',

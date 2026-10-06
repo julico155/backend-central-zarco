@@ -1,7 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
-import { Database, OrderChannel, OrderDeliveryType, OrderStatus } from '../database/types';
+import { Database, OrderChannel, OrderDeliveryType, OrderPaymentMethod, OrderStatus } from '../database/types';
 import { DomainException, ValidationError } from '../common/exceptions/domain-exception';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { checkoutGateAt } from '../common/time/service-window';
@@ -27,6 +27,7 @@ export type ReplaceableOrderResult =
       orderNumber: string;
       status: OrderStatus;
       deliveryType: OrderDeliveryType;
+      paymentMethod: OrderPaymentMethod;
       hasLocation: boolean;
       cart: {
         deliveryType: OrderDeliveryType;
@@ -57,6 +58,7 @@ interface ActiveOrderRow {
   customer_id: string | null;
   status: OrderStatus;
   payment_status: 'unpaid' | 'pending_review' | 'paid' | 'rejected';
+  payment_method: OrderPaymentMethod;
   delivery_type: OrderDeliveryType;
   delivery_latitude: number | null;
   delivery_longitude: number | null;
@@ -109,6 +111,7 @@ export class OrderReplacementService {
       orderNumber: order.order_number,
       status: order.status,
       deliveryType: order.delivery_type,
+      paymentMethod: order.payment_method,
       hasLocation: order.delivery_latitude !== null && order.delivery_longitude !== null,
       cart: { deliveryType: order.delivery_type, ...cart },
     };
@@ -345,6 +348,7 @@ export class OrderReplacementService {
         'customer_id',
         'status',
         'payment_status',
+        'payment_method',
         'delivery_type',
         'delivery_latitude',
         'delivery_longitude',
