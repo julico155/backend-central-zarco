@@ -42,7 +42,7 @@ function createService(opts: {
   };
   const cashRegister = { isOpen: jest.fn().mockResolvedValue(true) };
   const orders = {
-    createOrderInTransaction: jest.fn().mockResolvedValue({ id: 'new-order' }),
+    createOrderInTransaction: jest.fn().mockResolvedValue({ id: 'new-order', orderNumber: 'ORD-NEW' }),
     applyLocationLocked: jest.fn().mockResolvedValue({ decision: 'attach', quote: { result: 'applied' } }),
     findById: jest.fn().mockResolvedValue({ id: 'new-order' }),
     notifyOrderCreated: jest.fn().mockResolvedValue(undefined),
@@ -62,14 +62,14 @@ function createService(opts: {
 describe('OrderReplacementService.resolveReplaceable', () => {
   it('returns no_order when the phone has no customer', async () => {
     const { service } = createService({ dbSelectFrom: tableRouter({ customers: chain(undefined) }) });
-    await expect(service.resolveReplaceable('+59170001234')).resolves.toEqual({ result: 'no_order' });
+    await expect(service.resolveReplaceable('+59170001234', 'whatsapp')).resolves.toEqual({ result: 'no_order' });
   });
 
   it('returns no_order when the customer has no active order', async () => {
     const { service } = createService({
       dbSelectFrom: tableRouter({ customers: chain(customer), orders: chain(undefined) }),
     });
-    await expect(service.resolveReplaceable('+59170001234')).resolves.toEqual({ result: 'no_order' });
+    await expect(service.resolveReplaceable('+59170001234', 'whatsapp')).resolves.toEqual({ result: 'no_order' });
   });
 
   it('returns not_replaceable when the active order is already paid', async () => {
@@ -83,7 +83,7 @@ describe('OrderReplacementService.resolveReplaceable', () => {
         payment_attempts: chain([]),
       }),
     });
-    await expect(service.resolveReplaceable('+59170001234')).resolves.toEqual({
+    await expect(service.resolveReplaceable('+59170001234', 'whatsapp')).resolves.toEqual({
       result: 'not_replaceable',
       reasonCode: 'already_paid',
     });
@@ -106,7 +106,7 @@ describe('OrderReplacementService.resolveReplaceable', () => {
       }),
     });
 
-    await expect(service.resolveReplaceable('+59170001234')).resolves.toEqual({
+    await expect(service.resolveReplaceable('+59170001234', 'whatsapp')).resolves.toEqual({
       result: 'replaceable',
       orderId: 'order-1',
       orderNumber: 'ORD-0001',
@@ -127,7 +127,7 @@ describe('OrderReplacementService.appendNote', () => {
 
   it('returns no_order when the phone has no customer', async () => {
     const { service } = createService({ dbSelectFrom: jest.fn(), trxSelectFrom: tableRouter({ customers: chain(undefined) }) });
-    await expect(service.appendNote(dto, 'whatsapp-gateway')).resolves.toEqual({ result: 'no_order' });
+    await expect(service.appendNote(dto, 'whatsapp-gateway', 'whatsapp')).resolves.toEqual({ result: 'no_order' });
   });
 
   it('returns not_allowed when the active order already has a money signal', async () => {
@@ -142,7 +142,7 @@ describe('OrderReplacementService.appendNote', () => {
         payment_attempts: chain([]),
       }),
     });
-    await expect(service.appendNote(dto, 'whatsapp-gateway')).resolves.toEqual({
+    await expect(service.appendNote(dto, 'whatsapp-gateway', 'whatsapp')).resolves.toEqual({
       result: 'not_allowed',
       reasonCode: 'payment_in_progress',
     });
@@ -158,7 +158,7 @@ describe('OrderReplacementService.appendNote', () => {
       dbSelectFrom: jest.fn(),
       trxSelectFrom: tableRouter({ customers: chain(customer), orders: ordersChain }),
     });
-    await expect(service.appendNote(dto, 'whatsapp-gateway')).resolves.toEqual({ result: 'no_order' });
+    await expect(service.appendNote(dto, 'whatsapp-gateway', 'whatsapp')).resolves.toEqual({ result: 'no_order' });
     expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'whatsapp');
   });
 
@@ -176,7 +176,7 @@ describe('OrderReplacementService.appendNote', () => {
       trxUpdateTable: jest.fn(() => updateOrders),
     });
 
-    await expect(service.appendNote(dto, 'whatsapp-gateway')).resolves.toEqual({ result: 'saved' });
+    await expect(service.appendNote(dto, 'whatsapp-gateway', 'whatsapp')).resolves.toEqual({ result: 'saved' });
     expect(trx.updateTable).toHaveBeenCalledWith('orders');
     expect(updateOrders.set).toHaveBeenCalledWith(
       expect.objectContaining({ notes: 'ya tenía una nota\nsin cebolla' }),
@@ -209,7 +209,7 @@ describe('OrderReplacementService.createReplacement', () => {
       }),
     });
 
-    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway', 'whatsapp');
     expect(result).toEqual({ httpStatus: 409, body: { result: 'stale_order', currentOrderId: 'order-2' } });
     expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
   });
@@ -230,7 +230,7 @@ describe('OrderReplacementService.createReplacement', () => {
       }),
     });
 
-    await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway', 'whatsapp');
     expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'whatsapp');
   });
 
@@ -246,7 +246,7 @@ describe('OrderReplacementService.createReplacement', () => {
       }),
     });
 
-    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway', 'whatsapp');
     expect(result).toEqual({ httpStatus: 409, body: { result: 'not_replaceable', reasonCode: 'already_paid' } });
     expect(trx.updateTable).not.toHaveBeenCalled();
     expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
@@ -264,7 +264,7 @@ describe('OrderReplacementService.createReplacement', () => {
       }),
     });
 
-    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway', 'whatsapp');
     expect(result).toEqual({
       httpStatus: 409,
       body: { result: 'not_replaceable', reasonCode: 'payment_status_not_unpaid' },
@@ -293,10 +293,15 @@ describe('OrderReplacementService.createReplacement', () => {
       trxUpdateTable: jest.fn(() => updateOrders),
     });
 
-    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway', 'whatsapp');
 
     expect(result.httpStatus).toBe(201);
-    expect(result.body).toEqual({ result: 'replaced', orderId: 'new-order', replacedOrderId: 'order-1' });
+    expect(result.body).toEqual({
+      result: 'replaced',
+      orderId: 'new-order',
+      orderNumber: 'ORD-NEW',
+      replacedOrderId: 'order-1',
+    });
 
     // Vieja cancelada
     expect(updateOrders.set).toHaveBeenCalledWith(
@@ -346,7 +351,7 @@ describe('OrderReplacementService.createReplacement', () => {
       trxSelectFrom: tableRouter({ customers: chain(customer), orders: ordersChain }),
     });
 
-    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway');
+    const result = await service.createReplacement(dto, 'idem-1', 'whatsapp-gateway', 'whatsapp');
     expect(result).toEqual({ httpStatus: 409, body: { result: 'stale_order', currentOrderId: 'order-9' } });
     expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
   });
@@ -371,7 +376,127 @@ describe('OrderReplacementService.createReplacement', () => {
       }),
     });
 
-    await service.createReplacement({ ...dto, deliveryType: 'pickup' }, 'idem-1', 'whatsapp-gateway');
+    await service.createReplacement({ ...dto, deliveryType: 'pickup' }, 'idem-1', 'whatsapp-gateway', 'whatsapp');
     expect(orders.applyLocationLocked).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderReplacementService — canal web (apiClient=web)', () => {
+  const dto = {
+    customerPhone: '+59170001234',
+    orderId: 'order-1',
+    customerName: 'Juan Pérez',
+    deliveryType: 'delivery' as const,
+    paymentMethod: 'qr' as const,
+    items: [{ productId: 'p1', quantity: 2 }],
+    promotions: [],
+  };
+
+  it('resuelve/reemplaza el pedido activo filtrando por channel=web, nunca whatsapp', async () => {
+    const oldOrder = { id: 'order-1', customer_id: 'customer-1', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'delivery', delivery_latitude: null, delivery_longitude: null };
+    const ordersChain = chain(oldOrder);
+    const { service } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({
+        customers: chain(customer),
+        orders: ordersChain,
+        bank_qr_charges: chain([]),
+        payment_attempts: chain([]),
+      }),
+    });
+
+    await service.createReplacement(dto, 'idem-1', 'web', 'web');
+    expect(ordersChain.where).toHaveBeenCalledWith('channel', '=', 'web');
+    expect(ordersChain.where).not.toHaveBeenCalledWith('channel', '=', 'whatsapp');
+  });
+
+  it('un pedido activo de WHATSAPP es invisible para una llamada web: nunca lo cruza (not_found, no stale_order)', async () => {
+    // El mock no filtra de verdad; esto representa lo que Postgres devuelve
+    // cuando el único pedido activo del cliente es de otro canal: la query
+    // con channel='web' no encuentra nada, así que no hay candidato alguno.
+    const { service, orders } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({ customers: chain(customer), orders: chain(undefined) }),
+    });
+
+    const result = await service.createReplacement(dto, 'idem-1', 'web', 'web');
+    expect(result).toEqual({ httpStatus: 404, body: { result: 'not_found' } });
+    expect(orders.createOrderInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('el pedido nuevo nace con channel=web, no whatsapp, y la respuesta incluye orderNumber', async () => {
+    const oldOrder = { id: 'order-1', customer_id: 'customer-1', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'pickup', delivery_latitude: null, delivery_longitude: null };
+    const updateOrders = chain(undefined);
+    const { service, trx, orders } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({
+        customers: chain(customer),
+        orders: chain(oldOrder),
+        bank_qr_charges: chain([]),
+        payment_attempts: chain([]),
+      }),
+      trxUpdateTable: jest.fn(() => updateOrders),
+    });
+
+    const result = await service.createReplacement({ ...dto, deliveryType: 'pickup' }, 'idem-1', 'web', 'web');
+
+    expect(result.body).toEqual({
+      result: 'replaced',
+      orderId: 'new-order',
+      orderNumber: 'ORD-NEW',
+      replacedOrderId: 'order-1',
+    });
+    expect(orders.createOrderInTransaction).toHaveBeenCalledWith(
+      trx,
+      expect.objectContaining({ channel: 'web' }),
+    );
+  });
+
+  it('no copia la ubicación del pedido viejo (evita location_conflict cuando el checkout web adjunta la suya después)', async () => {
+    const oldOrder = {
+      id: 'order-1',
+      customer_id: 'customer-1',
+      status: 'confirmed',
+      payment_status: 'unpaid',
+      delivery_type: 'delivery',
+      delivery_latitude: -17.78,
+      delivery_longitude: -63.18,
+    };
+    const { service, orders } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({
+        customers: chain(customer),
+        orders: chain(oldOrder),
+        bank_qr_charges: chain([]),
+        payment_attempts: chain([]),
+      }),
+    });
+
+    await service.createReplacement(dto, 'idem-1', 'web', 'web');
+    // A diferencia de WhatsApp (ver test "reuses location" arriba), acá
+    // nunca se llama — el pedido nuevo queda awaiting_location para que el
+    // checkout adjunte él mismo la ubicación que el cliente elija.
+    expect(orders.applyLocationLocked).not.toHaveBeenCalled();
+  });
+
+  it('acepta paymentMethod distinto de qr (web no está restringido a QR como WhatsApp)', async () => {
+    const oldOrder = { id: 'order-1', customer_id: 'customer-1', status: 'confirmed', payment_status: 'unpaid', delivery_type: 'pickup', delivery_latitude: null, delivery_longitude: null };
+    const { service } = createService({
+      dbSelectFrom: jest.fn(),
+      trxSelectFrom: tableRouter({
+        customers: chain(customer),
+        orders: chain(oldOrder),
+        bank_qr_charges: chain([]),
+        payment_attempts: chain([]),
+      }),
+    });
+
+    const result = await service.createReplacement(
+      { ...dto, deliveryType: 'pickup', paymentMethod: 'cash' },
+      'idem-1',
+      'web',
+      'web',
+    );
+    expect(result.httpStatus).toBe(201);
   });
 });

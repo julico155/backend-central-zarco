@@ -271,30 +271,40 @@ Idempotency-Key: <uuid nuevo por intento real>
   "orderId": "...",              // el que te dio replaceable
   "customerName": "Juan Pérez",
   "deliveryType": "delivery",
-  "paymentMethod": "qr",         // solo qr, igual que 2.3
+  "paymentMethod": "qr",         // whatsapp-gateway: solo qr (igual que 2.3). web: sin esa restricción.
   "notes": "sin cebolla",        // opcional — NUNCA se hereda del pedido viejo, es texto nuevo
   "items": [...], "promotions": [...]
 }
-→ 201 { "result": "replaced", "orderId": "<pedido nuevo>", "replacedOrderId": "<pedido viejo>" }
-  | 404 { "code": "not_found", ... }                 // no hay cliente, o no tiene ningún pedido activo de whatsapp
+→ 201 { "result": "replaced", "orderId": "<pedido nuevo>", "orderNumber": "<pedido nuevo>", "replacedOrderId": "<pedido viejo>" }
+  | 404 { "code": "not_found", ... }                 // no hay cliente, o no tiene ningún pedido activo de TU canal
   | 409 { "code": "stale_order", "details": { "currentOrderId": "..." } }
   | 409 { "code": "not_replaceable", "details": { "reasonCode": "..." } }
 ```
 `orderId` **nunca** se usa para buscar el pedido directamente — Central
-resuelve el último pedido activo de WhatsApp del cliente por su cuenta (por
-`customerPhone`, igual que `replaceable`, e ignorando por completo cualquier
-pedido del POS) y recién ahí compara contra lo que mandaste. Si no
-coinciden —tu `orderId` quedó viejo, o apuntaba a otra cosa— da
-`stale_order` con el id correcto (`currentOrderId`) para que vuelvas a
-consultar `GET replaceable`. Esto es intencional: ni un `orderId` viejo ni
-uno de otro canal pueden disparar un reemplazo.
+resuelve el último pedido activo **del mismo canal con que te autenticaste**
+(`whatsapp-gateway` → canal whatsapp; `web` → canal web) del cliente por su
+cuenta (por `customerPhone`, igual que `replaceable`, e ignorando por
+completo cualquier pedido de otro canal — POS, o el otro de estos dos) y
+recién ahí compara contra lo que mandaste. Si no coinciden —tu `orderId`
+quedó viejo, o apuntaba a otra cosa— da `stale_order` con el id correcto
+(`currentOrderId`) para que vuelvas a consultar `GET replaceable`. Esto es
+intencional: ni un `orderId` viejo ni uno de otro canal pueden disparar un
+reemplazo. **Los 3 endpoints de esta sección (2.7) nunca cruzan canales**:
+un pedido que empezó por WhatsApp no se puede continuar desde el checkout
+web ni viceversa — si el cliente solo tiene un pedido activo en el otro
+canal, acá da `no_order`/`not_found` como si no tuviera nada.
 El pedido nuevo se crea con la misma lógica autoritativa que `POST /orders`
-(revalida catálogo, precios, promos) y dispara los mismos avisos
-(`order_received`/`location_request`/QR — ver 2.4/2.5). Si el pedido viejo
-era delivery y el nuevo sigue siendo delivery, Central reusa la ubicación
-guardada (nunca la tarifa: se recotiza entera) — no hace falta volver a
-pedir el pin. Si cambia a `pickup`, o si no había ubicación previa, sigue el
-flujo normal de `location_request`.
+(revalida catálogo, precios, promos), con el mismo canal que lo creó, y
+dispara los mismos avisos (`order_received`/`location_request`/QR — ver
+2.4/2.5). **Solo para `whatsapp-gateway`**: si el pedido viejo era delivery y
+el nuevo sigue siendo delivery, Central reusa la ubicación guardada (nunca
+la tarifa: se recotiza entera) — no hace falta volver a pedir el pin. Para
+`web` esto NO aplica — el pedido nuevo siempre queda esperando ubicación
+propia (el checkout la vuelve a pedir y la adjunta con
+`POST /orders/:id/location`), justamente para que esa llamada no choque con
+`location_conflict` contra una ubicación que Central ya hubiera copiado y
+cotizado de antes. Si cambia a `pickup`, o si no había ubicación previa,
+sigue el flujo normal de `location_request`.
 
 ⚠️ **Riesgo conocido, por decisión de producto**: el QR bancario del pedido
 viejo NO se cancela automáticamente — sigue siendo técnicamente cobrable

@@ -1,7 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, Transaction } from 'kysely';
 import { KYSELY } from '../database/database.module';
-import { Database, OrderDeliveryType, OrderStatus } from '../database/types';
+import { Database, OrderChannel, OrderDeliveryType, OrderStatus } from '../database/types';
 import { DomainException, ValidationError } from '../common/exceptions/domain-exception';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { checkoutGateAt } from '../common/time/service-window';
@@ -41,7 +41,7 @@ export type AppendNoteResult =
   | { result: 'not_allowed'; reasonCode: ReplaceableReasonCode };
 
 export type CreateReplacementResult =
-  | { result: 'replaced'; orderId: string; replacedOrderId: string }
+  | { result: 'replaced'; orderId: string; orderNumber: string; replacedOrderId: string }
   | { result: 'not_found' }
   /** dto.orderId no es el último pedido activo de WhatsApp del cliente — la sesión/CTA quedó vieja. */
   | { result: 'stale_order'; currentOrderId: string }
@@ -84,7 +84,7 @@ export class OrderReplacementService {
     private readonly orders: OrdersService,
   ) {}
 
-  async resolveReplaceable(customerPhoneRaw: string): Promise<ReplaceableOrderResult> {
+  async resolveReplaceable(customerPhoneRaw: string, channel: OrderChannel): Promise<ReplaceableOrderResult> {
     const phone = normalizePhone(customerPhoneRaw, { assumeInternational: true });
     const customer = await this.db
       .selectFrom('customers')
@@ -93,7 +93,7 @@ export class OrderReplacementService {
       .executeTakeFirst();
     if (!customer) return { result: 'no_order' };
 
-    const order = await this.findActiveOrder(this.db, customer.id);
+    const order = await this.findActiveOrder(this.db, customer.id, channel);
     if (!order) return { result: 'no_order' };
 
     const check = checkReplaceable(
@@ -114,14 +114,14 @@ export class OrderReplacementService {
     };
   }
 
-  async appendNote(dto: AppendOrderNoteDto, apiClient: string): Promise<AppendNoteResult> {
+  async appendNote(dto: AppendOrderNoteDto, apiClient: string, channel: OrderChannel): Promise<AppendNoteResult> {
     const phone = normalizePhone(dto.customerPhone, { assumeInternational: true });
     const outcome = await this.idempotency.run<AppendNoteResult>({
       apiClient,
       endpoint: NOTE_ENDPOINT,
       idempotencyKey: dto.sourceMessageId,
       requestBody: { customerPhone: dto.customerPhone, note: dto.note },
-      execute: async (trx) => ({ status: 200, body: await this.appendNoteLocked(trx, phone, dto.note) }),
+      execute: async (trx) => ({ status: 200, body: await this.appendNoteLocked(trx, phone, dto.note, channel) }),
     });
     return outcome.body;
   }
@@ -130,6 +130,7 @@ export class OrderReplacementService {
     trx: Transaction<Database>,
     phone: string,
     note: string,
+    channel: OrderChannel,
   ): Promise<AppendNoteResult> {
     const customer = await trx
       .selectFrom('customers')
@@ -138,7 +139,7 @@ export class OrderReplacementService {
       .executeTakeFirst();
     if (!customer) return { result: 'no_order' };
 
-    const order = await this.findActiveOrder(trx, customer.id, { forUpdate: true });
+    const order = await this.findActiveOrder(trx, customer.id, channel, { forUpdate: true });
     if (!order) return { result: 'no_order' };
 
     const check = checkReplaceable(
@@ -172,6 +173,7 @@ export class OrderReplacementService {
     dto: CreateOrderReplacementDto,
     idempotencyKey: string,
     apiClient: string,
+    channel: OrderChannel,
   ): Promise<{ httpStatus: number; body: CreateReplacementResult }> {
     const settings = await this.operationalSettings.getRow();
     const gate = checkoutGateAt(
@@ -186,7 +188,7 @@ export class OrderReplacementService {
         'Fuera de horario o sin caja abierta: todavía no se puede modificar un pedido en este momento.',
       );
     }
-    assertPaymentMethodAllowed('whatsapp', dto.paymentMethod);
+    assertPaymentMethodAllowed(channel, dto.paymentMethod);
 
     const phone = normalizePhone(dto.customerPhone, { assumeInternational: true });
     const outcome = await this.idempotency.run<CreateReplacementResult>({
@@ -195,7 +197,7 @@ export class OrderReplacementService {
       idempotencyKey,
       requestBody: dto,
       execute: async (trx) => {
-        const result = await this.executeReplacement(trx, phone, dto);
+        const result = await this.executeReplacement(trx, phone, dto, channel);
         return { status: httpStatusForReplacement(result), body: result };
       },
     });
@@ -215,6 +217,7 @@ export class OrderReplacementService {
     trx: Transaction<Database>,
     phone: string,
     dto: CreateOrderReplacementDto,
+    channel: OrderChannel,
   ): Promise<CreateReplacementResult> {
     const customer = await trx
       .selectFrom('customers')
@@ -224,12 +227,14 @@ export class OrderReplacementService {
     if (!customer) return { result: 'not_found' };
 
     // Nunca se busca por dto.orderId directamente — se resuelve el último
-    // pedido activo de WHATSAPP del cliente de forma independiente (igual
-    // que resolveReplaceable/appendNote) y recién ahí se compara contra lo
-    // que mandó el agente. Así un orderId viejo, ajeno, o de un canal
-    // distinto (POS) nunca puede ser el objetivo de un reemplazo: en el
-    // peor caso da stale_order, nunca toca la fila que el cliente pidió.
-    const old = await this.findActiveOrder(trx, customer.id, { forUpdate: true });
+    // pedido activo DEL MISMO CANAL del cliente de forma independiente
+    // (igual que resolveReplaceable/appendNote) y recién ahí se compara
+    // contra lo que mandó el agente. Así un orderId viejo, ajeno, de otro
+    // canal (whatsapp vs web), o de POS, nunca puede ser el objetivo de un
+    // reemplazo: en el peor caso da stale_order, nunca toca la fila que el
+    // cliente pidió. Cruzar canales (seguir desde web un pedido que empezó
+    // por WhatsApp) queda fuera de alcance a propósito — ver auditoría.
+    const old = await this.findActiveOrder(trx, customer.id, channel, { forUpdate: true });
     if (!old) {
       // No es necesariamente "no tiene pedido": si un replacement concurrente
       // ganó la carrera y ya comiteó, el SELECT ... FOR UPDATE de arriba se
@@ -238,7 +243,7 @@ export class OrderReplacementService {
       // que nunca ve el pedido nuevo que el ganador acaba de crear. En READ
       // COMMITTED cada sentencia toma su propio snapshot, así que una
       // segunda consulta (sin lock) acá sí lo encuentra si ya existe.
-      const maybeNowActive = await this.findActiveOrder(trx, customer.id);
+      const maybeNowActive = await this.findActiveOrder(trx, customer.id, channel);
       if (maybeNowActive) return { result: 'stale_order', currentOrderId: maybeNowActive.id };
       return { result: 'not_found' };
     }
@@ -262,7 +267,7 @@ export class OrderReplacementService {
 
     const created = await this.orders.createOrderInTransaction(trx, {
       customerId: customer.id,
-      channel: 'whatsapp',
+      channel,
       customerName: dto.customerName,
       deliveryType: dto.deliveryType,
       paymentMethod: dto.paymentMethod,
@@ -286,10 +291,22 @@ export class OrderReplacementService {
       .where('id', '=', old.id)
       .execute();
 
-    // Reusa ubicación SOLO si ambos son delivery y el viejo ya la tenía —
-    // nunca copia la tarifa: quoteForOrderInTransaction (dentro de
-    // applyLocationLocked) la recalcula entera con las reglas vigentes.
-    if (dto.deliveryType === 'delivery' && old.delivery_type === 'delivery' && old.delivery_latitude !== null && old.delivery_longitude !== null) {
+    // Reusa ubicación SOLO para WhatsApp (continuidad: el agente no siempre
+    // vuelve a pedir ubicación) y solo si ambos son delivery y el viejo ya
+    // la tenía — nunca copia la tarifa: quoteForOrderInTransaction (dentro
+    // de applyLocationLocked) la recalcula entera con las reglas vigentes.
+    // Para web NO se copia: el checkout vuelve a pedir la ubicación del
+    // cliente y la adjunta él mismo después — si acá ya hubiéramos cotizado
+    // con la vieja, esa llamada posterior chocaría con `location_conflict`
+    // (ver decideLocationAttach) al traer una ubicación distinta sobre un
+    // pedido que ya no está awaiting_location.
+    if (
+      channel === 'whatsapp' &&
+      dto.deliveryType === 'delivery' &&
+      old.delivery_type === 'delivery' &&
+      old.delivery_latitude !== null &&
+      old.delivery_longitude !== null
+    ) {
       const freshNew = await trx
         .selectFrom('orders')
         .select(['id', 'status', 'delivery_quote_status', 'delivery_latitude', 'delivery_longitude'])
@@ -301,18 +318,23 @@ export class OrderReplacementService {
       });
     }
 
-    return { result: 'replaced', orderId: created.id, replacedOrderId: old.id };
+    return { result: 'replaced', orderId: created.id, orderNumber: created.orderNumber, replacedOrderId: old.id };
   }
 
   /**
-   * "Último pedido activo" es SIEMPRE del canal whatsapp — un pedido POS del
-   * mismo cliente (mismo customer_id, distinto canal) no es candidato acá
-   * bajo ningún concepto: ni para leerlo, ni para agregarle una nota, ni
-   * para reemplazarlo. Estos 3 métodos comparten esta única resolución.
+   * "Último pedido activo" es SIEMPRE del MISMO canal que el api_client que
+   * llama (whatsapp o web, nunca pos — ver AGENT_API_CLIENT_CHANNEL en el
+   * controller) — un pedido de otro canal (incluido POS) nunca es candidato
+   * acá bajo ningún concepto: ni para leerlo, ni para agregarle una nota, ni
+   * para reemplazarlo. No cruza canales a propósito: un pedido que empezó
+   * por WhatsApp no se puede "continuar" desde el checkout web ni viceversa
+   * (ver auditoría — cruzar canales es una decisión de producto aparte).
+   * Estos 3 métodos comparten esta única resolución.
    */
   private async findActiveOrder(
     executor: Kysely<Database>,
     customerId: string,
+    channel: OrderChannel,
     opts: { forUpdate?: boolean } = {},
   ): Promise<ActiveOrderRow | undefined> {
     let query = executor
@@ -329,7 +351,7 @@ export class OrderReplacementService {
         'notes',
       ])
       .where('customer_id', '=', customerId)
-      .where('channel', '=', 'whatsapp')
+      .where('channel', '=', channel)
       .where('status', 'not in', ACTIVE_STATUSES_EXCLUDED)
       .orderBy('created_at', 'desc')
       .limit(1);

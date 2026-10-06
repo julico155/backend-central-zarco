@@ -84,7 +84,7 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
     await db.destroy();
   });
 
-  async function seedFixture() {
+  async function seedFixture(channel: 'whatsapp' | 'web' = 'whatsapp') {
     const category = await db
       .insertInto('categories')
       .values({ name: `e2e-repl-cat-${RUN}-${++seq}` })
@@ -105,7 +105,7 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
       .values({
         order_number: `ORD-E2E-REPL-${RUN}-${seq}`,
         customer_id: customer.id,
-        channel: 'whatsapp',
+        channel,
         customer_name: 'e2e-repl',
         delivery_type: 'pickup',
         payment_method: 'qr',
@@ -153,7 +153,7 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
       const decided = await paymentAttempts.decide(f.attempt.id, 'accepted');
       expect(decided.won).toBe(true);
 
-      const result = await replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway');
+      const result = await replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway', 'whatsapp');
       expect(result.body).toEqual({ result: 'not_replaceable', reasonCode: 'already_paid' });
 
       const final = await db
@@ -172,7 +172,7 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
   it('replacement gana primero: el pago tardío no revive el pedido cancelado (va a resolución humana, nunca a paid)', async () => {
     const f = await seedFixture();
     try {
-      const result = await replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway');
+      const result = await replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway', 'whatsapp');
       expect(result.body.result).toBe('replaced');
 
       await expect(paymentAttempts.decide(f.attempt.id, 'accepted')).rejects.toMatchObject({
@@ -199,7 +199,7 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
     try {
       const [decideOutcome, replacementOutcome] = await Promise.allSettled([
         paymentAttempts.decide(f.attempt.id, 'accepted'),
-        replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway'),
+        replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway', 'whatsapp'),
       ]);
 
       const final = await db
@@ -233,8 +233,8 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
     try {
       const dto = replacementDto(f);
       const [a, b] = await Promise.allSettled([
-        replacement.createReplacement(dto, `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway'),
-        replacement.createReplacement(dto, `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway'),
+        replacement.createReplacement(dto, `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway', 'whatsapp'),
+        replacement.createReplacement(dto, `e2e-repl-${RUN}-${++seq}`, 'whatsapp-gateway', 'whatsapp'),
       ]);
       const results = [a, b].map((r) => (r.status === 'fulfilled' ? r.value.body.result : 'threw'));
       expect(results.filter((r) => r === 'replaced')).toHaveLength(1);
@@ -256,8 +256,8 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
     const f = await seedFixture();
     try {
       const idemKey = `e2e-repl-${RUN}-${++seq}`;
-      const first = await replacement.createReplacement(replacementDto(f), idemKey, 'whatsapp-gateway');
-      const second = await replacement.createReplacement(replacementDto(f), idemKey, 'whatsapp-gateway');
+      const first = await replacement.createReplacement(replacementDto(f), idemKey, 'whatsapp-gateway', 'whatsapp');
+      const second = await replacement.createReplacement(replacementDto(f), idemKey, 'whatsapp-gateway', 'whatsapp');
       expect(second.body).toEqual(first.body);
 
       const replacements = await db
@@ -266,6 +266,50 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
         .where('replaces_order_id', '=', f.orderId)
         .execute();
       expect(replacements).toHaveLength(1);
+    } finally {
+      await cleanup(f);
+    }
+  });
+
+  it('canal web: el reemplazo nace channel=web, trae orderNumber y no copia ubicación', async () => {
+    const f = await seedFixture('web');
+    try {
+      const result = await replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'web', 'web');
+      expect(result.body.result).toBe('replaced');
+      if (result.body.result !== 'replaced') throw new Error('unreachable');
+      expect(result.body.orderNumber).toBeTruthy();
+
+      const created = await db
+        .selectFrom('orders')
+        .select(['channel', 'status', 'delivery_latitude'])
+        .where('id', '=', result.body.orderId)
+        .executeTakeFirstOrThrow();
+      expect(created.channel).toBe('web');
+      // pickup en este fixture, así que ni aplica cotizar ubicación — el punto
+      // es que applyLocationLocked ni se invoca (no hay location_conflict
+      // posible porque no se copió nada).
+      expect(created.delivery_latitude).toBeNull();
+      // cleanup(f) rompe el ciclo de FK (replaced_by_order_id) y borra el
+      // nuevo pedido vía `replaces_order_id = f.orderId` — no hace falta
+      // borrarlo a mano acá.
+    } finally {
+      await cleanup(f);
+    }
+  });
+
+  it('aislamiento de canal real: un pedido activo de whatsapp es invisible para una llamada web (not_found, nunca lo toca)', async () => {
+    const f = await seedFixture('whatsapp');
+    try {
+      const result = await replacement.createReplacement(replacementDto(f), `e2e-repl-${RUN}-${++seq}`, 'web', 'web');
+      expect(result.body).toEqual({ result: 'not_found' });
+
+      const untouched = await db
+        .selectFrom('orders')
+        .select(['status', 'replaced_by_order_id'])
+        .where('id', '=', f.orderId)
+        .executeTakeFirstOrThrow();
+      expect(untouched.status).not.toBe('cancelled');
+      expect(untouched.replaced_by_order_id).toBeNull();
     } finally {
       await cleanup(f);
     }
