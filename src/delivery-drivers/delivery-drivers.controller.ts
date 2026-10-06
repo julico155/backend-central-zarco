@@ -17,6 +17,7 @@ import { CurrentStaffUser } from '../auth/current-staff-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { DeliveryDriversService } from './delivery-drivers.service';
 import { AcceptDeliveryOrderDto } from './dto/accept-delivery-order.dto';
+import { ConfirmDeliveryDto } from './dto/confirm-delivery.dto';
 import { parsePagination } from '../reports/reports.range';
 
 /** Pantalla del repartidor. Solo rol `delivery` (o `admin` como override). */
@@ -67,7 +68,11 @@ export class DeliveryDriversController {
 
   @Post(':id/deliver')
   @HttpCode(200)
-  deliver(@Param('id', ParseUUIDPipe) id: string, @CurrentStaffUser() staffUser: JwtPayload) {
-    return this.drivers.deliver(id, staffUser);
+  deliver(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmDeliveryDto,
+    @CurrentStaffUser() staffUser: JwtPayload,
+  ) {
+    return this.drivers.deliver(id, staffUser, dto.cashCollected);
   }
 }

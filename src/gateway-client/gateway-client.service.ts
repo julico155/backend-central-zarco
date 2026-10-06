@@ -55,6 +55,11 @@ export type CustomerMessageIntent =
       context: { orderNumber: string; deliveryType: OrderDeliveryTypeContext; fullyPaid: boolean };
     }
   | { messageType: 'payment_rejected'; context: { orderNumber: string; deliveryType: OrderDeliveryTypeContext } }
+  | {
+      /** Todo el pedido (comida + envío) se cobra en efectivo contra entrega — nunca incluye el caso QR (ahí el envío sigue siendo informal con el repartidor). */
+      messageType: 'cash_on_delivery_confirmation';
+      context: { orderNumber: string; deliveryType: OrderDeliveryTypeContext; totalAmount: number };
+    }
   | { messageType: 'order_expired_unpaid'; context: { orderNumber: string } }
   | { messageType: 'late_request_unavailable'; context: { requestNumber: string } }
   | { messageType: 'late_request_accepted'; context: { requestNumber: string; orderId: string } }

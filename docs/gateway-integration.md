@@ -66,7 +66,7 @@ Idempotency-Key: <uuid único por intento — SIEMPRE, ver nota abajo>
   "channel": "whatsapp",             // opcional: el canal se deriva de tu token (whatsapp-gateway = whatsapp); si lo mandás y no coincide, 400 channel_mismatch
   "customerName": "Juan Pérez",
   "deliveryType": "delivery" | "pickup" | "dine_in",   // pickup = para llevar, dine_in = comer en el local
-  "paymentMethod": "qr",                 // WhatsApp solo acepta qr; cualquier otro método da 400 payment_method_not_allowed
+  "paymentMethod": "qr",                 // "qr" o "cash" (todo el pedido, comida + envío, contra entrega) — card/split dan 400 payment_method_not_allowed
   "notes": "sin cebolla" ,           // opcional
   "items": [
     { "productId": "<uuid>", "quantity": 3 },
@@ -165,31 +165,47 @@ pedido ni guarda la ubicación para uno futuro: al crear el pedido hay que
 pedir/adjuntar una ubicación nueva. `status: "manual_quote"` = fuera del
 rango automático (montos `null`).
 
-### 2.5 Pago QR
+### 2.5 Pago: QR o efectivo contra entrega
 
-**Reglas de pago de WhatsApp**: todos los pedidos (delivery, pickup y mesa)
-se pagan **solo por QR** — no hay efectivo ni tarjeta por este canal. Un
-pedido que no se paga en **20 minutos** se cancela solo (se anula su QR en el
-banco y le llega al cliente un mensaje saliente normal avisándole que el
-pedido fue cancelado y que puede hacer uno nuevo). Además, el token del
-agente ya **no** puede confirmar ni cancelar cobros en efectivo
-(`cash/confirm` y `cash/cancel` son solo para staff).
+**Reglas de pago de WhatsApp**: `paymentMethod` es `"qr"` o `"cash"` — card y
+split no tienen sentido por este canal (nadie presente para cobrar tarjeta
+ni dividir el cobro). Un pedido QR que no se paga en **20 minutos** se
+cancela solo (se anula su QR en el banco y le llega al cliente un mensaje
+saliente normal avisándole que el pedido fue cancelado y que puede hacer uno
+nuevo) — un pedido `cash` no tiene ese TTL una vez que cocina lo acepta (ver
+abajo). El token del agente ya **no** puede confirmar ni cancelar cobros en
+efectivo (`cash/confirm` y `cash/cancel` son solo para staff; el que
+confirma un `cash` de delivery es el repartidor, al entregar, con su propio
+rol — no con este token).
 
-Para pedidos con `paymentMethod: "qr"`, el backend genera un QR real del
-banco y te manda solo una intención `messageType: "qr_confirmation"` (ver
-sección 3.1 para el `context` completo, con el desglose de productos,
-subtotal y envío) — no hace falta que el agente pida nada. **El momento en
-que se manda depende del tipo de pedido**: pickup y mesa no esperan nada
-más, así que el QR sale apenas se crea el pedido. Delivery todavía no tiene
-el total final (falta el envío, que se calcula recién con la ubicación) —
-el QR sale recién cuando el pedido pasa de `awaiting_location` a
-`confirmed` con la cotización aplicada, es decir tras
-`POST /internal/agent/locations/attach` (sección 2.3) con resultado
-`attached` y cotización `applied`. Si la ubicación cae `pending_manual`
-(fuera del techo automático), el QR espera a que un `admin`/`cashier` fije
-el monto a mano; ahí también se manda solo. La confirmación del pago es
-automática (el backend consulta al banco solo); cuando se confirma, el
-agente recibe `messageType: "payment_confirmed"` (sección 3.1).
+**`paymentMethod: "qr"`** — el backend genera un QR real del banco y te manda
+solo una intención `messageType: "qr_confirmation"` (ver sección 3.1 para el
+`context` completo, con el desglose de productos, subtotal y envío) — no
+hace falta que el agente pida nada. **El momento en que se manda depende del
+tipo de pedido**: pickup y mesa no esperan nada más, así que el QR sale
+apenas se crea el pedido. Delivery todavía no tiene el total final (falta el
+envío, que se calcula recién con la ubicación) — el QR sale recién cuando el
+pedido pasa de `awaiting_location` a `confirmed` con la cotización aplicada,
+es decir tras `POST /internal/agent/locations/attach` (sección 2.3) con
+resultado `attached` y cotización `applied`. Si la ubicación cae
+`pending_manual` (fuera del techo automático), el QR espera a que un
+`admin`/`cashier` fije el monto a mano; ahí también se manda solo. La
+confirmación del pago es automática (el backend consulta al banco solo);
+cuando se confirma, el agente recibe `messageType: "payment_confirmed"`
+(sección 3.1). **El QR siempre cobra solo la comida** (`subtotalAmount`) — el
+envío de un pedido QR sigue siendo informal, en efectivo, entre cliente y
+repartidor; el sistema no lo cuadra.
+
+**`paymentMethod: "cash"`** — todo el pedido (comida + envío) se cobra en
+efectivo al entregar (o al retirar, si es pickup), no hay QR de por medio.
+En vez de `qr_confirmation` te llega `messageType:
+"cash_on_delivery_confirmation"` con el `totalAmount` ya definitivo (mismo
+momento que el QR: apenas se crea para pickup/mesa, recién tras cotizar para
+delivery). Cocina puede empezar a preparar **sin que `payment_status` sea
+`paid` todavía** — eso es intencional, el cobro pasa al entregar. Si el
+cliente no paga al recibir, el pedido se entrega igual (el negocio se lo
+cobra al repartidor después, fuera del sistema) — nunca se bloquea la
+entrega por eso.
 
 Si por algún motivo el banco falla al generar el QR, el backend manda
 `messageType: "payment_proof_request"` en vez del QR — el agente le pide al
@@ -348,6 +364,7 @@ devolvé cualquier string único y estable para ese envío.
 | `order_received` | Pickup/mesa al crear el pedido (delivery no lo recibe, ver `location_request`) | `{ orderNumber, deliveryType }` |
 | `qr_confirmation` | QR real generado con éxito (pickup/mesa al crear; delivery recién tras cotizar) | `{ orderNumber, currency: "BOB", deliveryType, items[], promotions[], subtotalAmount, deliveryBaseAmount, deliverySurchargeAmount, deliveryAmount, totalAmount, qrAmount }` + `imageUrl` |
 | `payment_proof_request` | El banco falló al generar el QR real: fallback, se pide pagar y mandar captura | `{ orderNumber, qrAmount }` |
+| `cash_on_delivery_confirmation` | `paymentMethod: "cash"`: total definitivo a cobrar contra entrega (comida + envío), mismo momento que `qr_confirmation` | `{ orderNumber, deliveryType, totalAmount }` |
 | `payment_confirmed` | Pago aceptado (QR o efectivo). `fullyPaid: false` solo en un `split` cuando la pata QR entró pero la pata efectivo todavía no | `{ orderNumber, deliveryType, fullyPaid }` |
 | `payment_rejected` | El comprobante/pago fue rechazado | `{ orderNumber, deliveryType }` |
 | `order_expired_unpaid` | El pedido se cancela solo por no pagarse en el TTL (20 min) | `{ orderNumber }` |

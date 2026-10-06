@@ -97,6 +97,33 @@ describe('OrdersService.notifyOrderCreated', () => {
     );
   });
 
+  it('sends cash_on_delivery_confirmation with the full total (comida + envío) for a cash pickup order', async () => {
+    const { service, notifications } = createService();
+
+    await notifyOrderCreated(service, {
+      ...baseOrder,
+      status: 'confirmed',
+      deliveryType: 'pickup',
+      paymentMethod: 'cash',
+      totalAmount: 42,
+    });
+
+    expect(notifications.notifyNow).toHaveBeenCalledWith({
+      channel: 'whatsapp',
+      kind: 'cash_on_delivery_confirmation',
+      targetRef: 'order-1',
+      payload: {
+        customerId: 'customer-1',
+        messageType: 'cash_on_delivery_confirmation',
+        context: { orderNumber: 'ORD-260929-007', deliveryType: 'pickup', totalAmount: 42 },
+      },
+    });
+    // Nunca genera/manda un QR para un pedido en efectivo.
+    expect(notifications.notifyNow).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'qr_confirmation' }),
+    );
+  });
+
   it('a failed gateway on location_request does not throw (best-effort)', async () => {
     const { service, notifications } = createService();
     notifications.notifyNow.mockRejectedValueOnce(new Error('gateway down'));

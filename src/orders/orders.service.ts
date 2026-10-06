@@ -347,14 +347,42 @@ export class OrdersService {
   }
 
   /**
-   * Genera el QR real del banco y lo manda por WhatsApp. Se llama solo
-   * cuando el pedido ya tiene su total final: en la creación misma para
-   * pickup/mesa (no esperan nada más), y recién tras cotizar para delivery
-   * (ver `attachLocation` y `AgentLocationsService`) — mandarlo antes cobraría
-   * un total que todavía puede cambiar con la ubicación.
+   * Avisa el total final del pedido — QR real del banco si paymentMethod es
+   * 'qr', o el aviso de cobro en efectivo contra entrega si es 'cash'. Se
+   * llama solo cuando el pedido ya tiene su total final: en la creación
+   * misma para pickup/mesa (no esperan nada más), y recién tras cotizar para
+   * delivery (ver `attachLocation` y `AgentLocationsService`) — mandarlo
+   * antes cobraría/informaría un total que todavía puede cambiar con la
+   * ubicación.
    */
   private async sendQrConfirmation(order: OrderResponse): Promise<void> {
     if (!order.customerId) return;
+
+    // Todo efectivo (comida + envío) — nunca hay QR que generar, el aviso es
+    // directo con el total ya conocido (recién cotizado, si es delivery).
+    if (order.paymentMethod === 'cash') {
+      try {
+        await this.notifications.notifyNow({
+          channel: 'whatsapp',
+          kind: 'cash_on_delivery_confirmation',
+          targetRef: order.id,
+          payload: {
+            customerId: order.customerId,
+            messageType: 'cash_on_delivery_confirmation',
+            context: {
+              orderNumber: order.orderNumber,
+              deliveryType: order.deliveryType as 'delivery' | 'pickup' | 'dine_in',
+              totalAmount: order.totalAmount,
+            },
+          },
+        });
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo notificar cash_on_delivery_confirmation para ${order.id}: ${(error as Error).message}`,
+        );
+      }
+      return;
+    }
 
     // El external_message_id de ESTE envío es lo que PaymentProofsService
     // usa para "reply_to_qr" (invariante de asociación nivel 1) — se sigue
@@ -1341,9 +1369,11 @@ export class OrdersService {
    * es el username del staff autenticado (tablero de cocina, JWT) — queda
    * guardado en `status_updated_by` para saber quién movió el pedido.
    *
-   * Pago contra entrega SOLO existe para delivery + cash (el repartidor
-   * cobra en la puerta) — ahí `preparing` no exige `paid` todavía. Todo lo
-   * demás (pickup/POS, y delivery con QR — un QR no se "entrega") sí exige
+   * Pago contra entrega SOLO existe para `payment_method='cash'` (el
+   * repartidor cobra todo —comida + envío— al entregar, o el mostrador al
+   * retirar; ver `DeliveryDriversService.deliver`/`OrdersService.confirmCash`)
+   * — ahí `preparing` no exige `paid` todavía, cocina arranca a cuenta de que
+   * se cobre al final. Todo lo demás (QR, card, split) sí exige
    * `payment_status: 'paid'` antes de `-> preparing`, porque en esos casos
    * el pago siempre se confirma ANTES de que cocina empiece.
    */
@@ -1366,7 +1396,7 @@ export class OrdersService {
       throw new InvalidStateTransitionError('order', order.status, to);
     }
 
-    if (to === 'preparing' && order.payment_status !== 'paid') {
+    if (to === 'preparing' && order.payment_method !== 'cash' && order.payment_status !== 'paid') {
       throw new DomainException(
         'payment_required',
         HttpStatus.CONFLICT,

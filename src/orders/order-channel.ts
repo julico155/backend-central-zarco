@@ -15,21 +15,25 @@ const CHANNEL_BY_API_CLIENT: Record<string, OrderChannel> = {
   web: 'web',
 };
 
+const WHATSAPP_ALLOWED_PAYMENT_METHODS: OrderPaymentMethod[] = ['qr', 'cash'];
+
 /**
- * Reglas de pago por canal. WhatsApp solo cobra por QR (delivery, pickup y
- * mesa): no hay persona presente que reciba efectivo, y un pedido sin pagar no
- * debe llegar a cocina. El POS conserva sus métodos (efectivo, QR y split).
+ * Reglas de pago por canal. WhatsApp cobra por QR o, para delivery, todo en
+ * efectivo contra entrega (comida + envío) — el repartidor es quien cobra y
+ * confirma, ver `DeliveryDriversService.deliver`. `split`/`card` siguen sin
+ * sentido acá (nadie presente para cobrar tarjeta ni dividir cobro).
+ * El POS conserva sus métodos propios (efectivo, QR y split).
  */
 export function assertPaymentMethodAllowed(
   channel: OrderChannel,
   paymentMethod: OrderPaymentMethod,
 ): void {
-  if (channel === 'whatsapp' && paymentMethod !== 'qr') {
+  if (channel === 'whatsapp' && !WHATSAPP_ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
     throw new DomainException(
       'payment_method_not_allowed',
       HttpStatus.BAD_REQUEST,
-      'Los pedidos de WhatsApp solo se pagan por QR.',
-      { channel, paymentMethod, allowed: ['qr'] },
+      'Los pedidos de WhatsApp solo se pagan por QR o en efectivo.',
+      { channel, paymentMethod, allowed: WHATSAPP_ALLOWED_PAYMENT_METHODS },
     );
   }
 }

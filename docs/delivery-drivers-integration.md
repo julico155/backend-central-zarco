@@ -41,8 +41,10 @@ aceptar:
    "nearbyOrders": [{ "id": "...", "orderNumber": "ORD-0124", "distanceMeters": 180 }] }]
 ```
 
-`deliveryFeeAmount` es solo informativo: el envío se le paga al repartidor y no
-se cuadra en el sistema (la comida siempre se cobra antes, por QR).
+`deliveryFeeAmount` es solo informativo: el envío de un pedido QR se le paga
+al repartidor y no se cuadra en el sistema. Para `paymentMethod: "cash"` esto
+cambia — ahí SÍ se cuadra, ver `deliver` y `history` abajo: el repartidor
+cobra todo (comida + envío) y lo confirma al entregar.
 
 `latitude`/`longitude`/`mapsUrl` son `null` si el pedido todavía no tiene
 cotización de distancia (`deliveryQuoteStatus` distinto de `quoted`).
@@ -81,6 +83,18 @@ Solo el repartidor asignado (o admin). `out_for_delivery → delivered`; devuelv
 `{ id, deliveredAt }`. Errores: `not_your_order` (403),
 `order_not_out_for_delivery` (409).
 
+```json
+{ "cashCollected": true }   // opcional, default true — solo importa si paymentMethod es "cash"
+```
+
+Si el pedido es `paymentMethod: "cash"` y todavía no está pagado, `deliver`
+confirma el cobro (`payment_status → paid`) en el mismo golpe que marca
+`delivered` — no hace falta un paso aparte. Mandá `cashCollected: false` si
+el cliente NO pagó: el pedido se entrega igual (nunca se bloquea la entrega
+por esto), pero queda `unpaid` y aparece como pendiente en `history` — el
+negocio se lo cobra al repartidor después, fuera del sistema. Para
+`paymentMethod: "qr"` este campo no hace nada (ya estaba pagado antes).
+
 ### `GET /delivery/orders/history`
 Entregas ya hechas, más nuevas primero. Roles `delivery`, `admin` y `cashier`.
 
@@ -91,17 +105,26 @@ Entregas ya hechas, más nuevas primero. Roles `delivery`, `admin` y `cashier`.
 | `limit`, `offset` | Paginación (default 50, tope 200). |
 
 ```json
-{ "totals": { "deliveries": 7, "deliveryFeeTotal": 105 },
+{ "totals": { "deliveries": 7, "deliveryFeeTotal": 105,
+    "cashCollectedTotal": 340, "cashPendingTotal": 20 },
   "limit": 50, "offset": 0,
   "orders": [{ "id": "...", "orderNumber": "ORD-0123", "customerName": "Ana",
     "driverId": "...", "driverName": "moto1",
     "acceptedAt": "2026-09-23T22:10:00.000Z", "deliveredAt": "2026-09-23T22:32:00.000Z",
-    "deliveryDistanceMeters": 2100, "deliveryFeeAmount": 15 }] }
+    "deliveryDistanceMeters": 2100, "deliveryFeeAmount": 15,
+    "paymentMethod": "cash", "paymentStatus": "paid", "totalAmount": 45 }] }
 ```
 
-`totals` cubre el filtro completo, no solo la página. Los minutos en ruta salen
-de `deliveredAt - acceptedAt`. `deliveryFeeTotal` es informativo ("cuánto le
-corresponde"): el envío no se cuadra en el sistema.
+`totals` cubre el filtro completo, no solo la página. Los minutos en ruta
+salen de `deliveredAt - acceptedAt`. `deliveryFeeTotal` sigue siendo
+informativo (envío de pedidos QR). `cashCollectedTotal`/`cashPendingTotal`
+son el cuadre real de los pedidos `payment_method: "cash"` (comida + envío,
+pedido completo): `cashCollectedTotal` es lo que el repartidor ya cobró y
+confirmó al entregar (`deliver` con `cashCollected: true`, o el default);
+`cashPendingTotal` es lo que marcó como no cobrado (`cashCollected: false`)
+— eso es lo que el negocio le descuenta a la moto al cuadrar la noche. Por
+pedido, `paymentStatus: "unpaid"` con `paymentMethod: "cash"` es exactamente
+ese caso.
 
 ## Límites conocidos
 

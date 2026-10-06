@@ -214,8 +214,13 @@ export class DeliveryDriversService {
 
   /**
    * Entregas ya hechas, filtradas por `delivered_at` (fecha de Bolivia). Sin
-   * `from`/`to` devuelve las de hoy. `totals` cubre el filtro completo, no solo
-   * la página — es lo que se le muestra al repartidor como "cuánto le toca".
+   * `from`/`to` devuelve las de hoy. `totals` cubre el filtro completo, no
+   * solo la página — es lo que se le muestra al repartidor/cajero para
+   * cuadrar la noche. `cashCollectedTotal`/`cashPendingTotal` suman el
+   * pedido COMPLETO (comida + envío) de los `payment_method='cash'` — esto
+   * es aparte del cierre de caja del POS (`CashRegisterService`): el
+   * efectivo que trae puesta la moto se cuadra acá, a mano, no contra una
+   * sesión de caja (ver `deliver`).
    */
   async listHistory(actor: JwtPayload, query: DeliveryHistoryQuery) {
     const driverId = resolveHistoryDriverId(actor, query.driverId);
@@ -236,6 +241,12 @@ export class DeliveryDriversService {
         .select([
           sql<string>`count(*)`.as('deliveries'),
           sql<string>`coalesce(sum(delivery_base_amount + delivery_surcharge_amount), 0)`.as('fees'),
+          sql<string>`coalesce(sum(case when payment_method = 'cash' and payment_status = 'paid' then total_amount else 0 end), 0)`.as(
+            'cash_collected',
+          ),
+          sql<string>`coalesce(sum(case when payment_method = 'cash' and payment_status != 'paid' then total_amount else 0 end), 0)`.as(
+            'cash_pending',
+          ),
         ])
         .executeTakeFirstOrThrow(),
       base()
@@ -250,6 +261,9 @@ export class DeliveryDriversService {
           'delivery_distance_meters',
           'delivery_base_amount',
           'delivery_surcharge_amount',
+          'payment_method',
+          'payment_status',
+          'total_amount',
         ])
         .orderBy('delivered_at', 'desc')
         .orderBy('id')
@@ -262,6 +276,11 @@ export class DeliveryDriversService {
       totals: {
         deliveries: Number(totals.deliveries),
         deliveryFeeTotal: Math.round(Number(totals.fees) * 100) / 100,
+        // Pedidos 'cash' ya cobrados (confirmados al entregar) vs. los que
+        // el repartidor marcó como no cobrados — eso último se le descuenta
+        // a la moto, fuera del sistema.
+        cashCollectedTotal: Math.round(Number(totals.cash_collected) * 100) / 100,
+        cashPendingTotal: Math.round(Number(totals.cash_pending) * 100) / 100,
       },
       limit: query.limit,
       offset: query.offset,
@@ -275,6 +294,10 @@ export class DeliveryDriversService {
         deliveredAt: iso(o.delivered_at),
         deliveryDistanceMeters: o.delivery_distance_meters,
         deliveryFeeAmount: Number(o.delivery_base_amount) + Number(o.delivery_surcharge_amount),
+        paymentMethod: o.payment_method,
+        // Para cash: 'paid' = cobrado al entregar; cualquier otra cosa = pendiente de cobrarle a la moto.
+        paymentStatus: o.payment_status,
+        totalAmount: Number(o.total_amount),
       })),
     };
   }
@@ -347,10 +370,26 @@ export class DeliveryDriversService {
     return accepted;
   }
 
-  async deliver(orderId: string, driver: JwtPayload): Promise<{ id: string; deliveredAt: string }> {
+  /**
+   * `cashCollected` solo importa para `payment_method='cash'` y todavía
+   * impago: marca `payment_status='paid'` en el mismo golpe que `delivered`
+   * (el repartidor cobra y entrega en el mismo momento real). Si el cliente
+   * no pagó (`cashCollected: false`), el pedido se entrega igual — el
+   * negocio no bloquea la entrega por eso, se cuadra aparte con la moto — y
+   * queda `unpaid` para que el cuadre de fin de noche (`listHistory`) lo
+   * muestre como pendiente de cobrarle al repartidor. Nunca ata esto a una
+   * sesión de caja (a diferencia de `OrdersService.confirmCash`): la plata
+   * se cobró en la calle, no en el mostrador, y el cuadre de motos es un
+   * proceso aparte, manual, a fin de noche — no el cierre de caja del POS.
+   */
+  async deliver(
+    orderId: string,
+    driver: JwtPayload,
+    cashCollected = true,
+  ): Promise<{ id: string; deliveredAt: string }> {
     const order = await this.db
       .selectFrom('orders')
-      .select(['id', 'status', 'delivery_driver_id'])
+      .select(['id', 'status', 'delivery_driver_id', 'payment_method', 'payment_status'])
       .where('id', '=', orderId)
       .executeTakeFirst();
     if (!order) throw new NotFoundDomainError('order', orderId);
@@ -362,10 +401,18 @@ export class DeliveryDriversService {
       );
     }
 
+    const confirmsCash =
+      order.payment_method === 'cash' && order.payment_status !== 'paid' && cashCollected;
     const now = new Date();
     const delivered = await this.db
       .updateTable('orders')
-      .set({ status: 'delivered', delivered_at: now, status_updated_by: driver.username, updated_at: now })
+      .set({
+        status: 'delivered',
+        delivered_at: now,
+        status_updated_by: driver.username,
+        updated_at: now,
+        ...(confirmsCash ? { payment_status: 'paid' as const, cash_confirmed_at: now } : {}),
+      })
       .where('id', '=', orderId)
       .where('status', '=', 'out_for_delivery')
       .returning('id')

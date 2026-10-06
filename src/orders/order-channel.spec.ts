@@ -2,9 +2,10 @@ import { DomainException, ValidationError } from '../common/exceptions/domain-ex
 import { assertPaymentMethodAllowed, resolveOrderChannel } from './order-channel';
 
 describe('assertPaymentMethodAllowed', () => {
-  it('WhatsApp solo acepta QR', () => {
+  it('WhatsApp acepta QR y efectivo contra entrega (comida + envío), nunca card ni split', () => {
     expect(() => assertPaymentMethodAllowed('whatsapp', 'qr')).not.toThrow();
-    for (const method of ['cash', 'card', 'split'] as const) {
+    expect(() => assertPaymentMethodAllowed('whatsapp', 'cash')).not.toThrow();
+    for (const method of ['card', 'split'] as const) {
       try {
         assertPaymentMethodAllowed('whatsapp', method);
         fail('debía lanzar');
