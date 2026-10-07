@@ -57,7 +57,7 @@ export function buildDeliveryNotice(input: DeliveryNoticeInput): string {
 
   const distance = input.distanceMeters === null ? '' : ` · ${(input.distanceMeters / 1000).toFixed(1)} km`;
   if (input.isCash) {
-    lines.push('QUIERE EFECTIVO');
+    lines.push('PEDIDO EN EFECTIVO');
     lines.push(`Productos: Bs ${formatBs(input.subtotalAmount)}`);
     lines.push(`Envío: Bs ${formatBs(input.deliveryAmount)}${distance}`);
     lines.push(`TOTAL A COBRAR: Bs ${formatBs(input.subtotalAmount + input.deliveryAmount)}`);

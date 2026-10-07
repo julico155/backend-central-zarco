@@ -49,6 +49,7 @@ function createService(opts: { aiTestPhones: string[]; customerPhone?: string | 
     cashRegister as never,
     {} as never,
     config as never,
+    {} as never,
   );
   return { service, db, idempotency, customersChain };
 }

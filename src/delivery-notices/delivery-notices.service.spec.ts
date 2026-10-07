@@ -94,11 +94,34 @@ describe('DeliveryNoticesService', () => {
   it.each([
     ['pickup', { ...eligibleOrder, delivery_type: 'pickup' }],
     ['unquoted delivery', { ...eligibleOrder, delivery_quote_status: 'pending' }],
-    ['unpaid delivery', { ...eligibleOrder, payment_status: 'unpaid' }],
+    ['unpaid QR delivery (no excepción para QR)', { ...eligibleOrder, payment_status: 'unpaid' }],
     ['delivery without GPS', { ...eligibleOrder, latitude: null }],
   ])('does not notify a %s order', async (_label, order) => {
     const notify = jest.fn();
     const { service } = createService(order, notify);
+
+    await service.notifyConfirmed('order-1');
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('notifies a cash delivery order already quoted, even though it is still unpaid', async () => {
+    const notify = jest.fn().mockResolvedValue(undefined);
+    const cashOrder = { ...eligibleOrder, payment_method: 'cash', payment_status: 'unpaid' };
+    const { service } = createService(cashOrder, notify);
+
+    await service.notifyConfirmed('order-1');
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    const text = notify.mock.calls[0][0].payload.text as string;
+    expect(text).toContain('PEDIDO EN EFECTIVO');
+    expect(text).toContain('TOTAL A COBRAR');
+  });
+
+  it('does not notify a cash delivery order that is not quoted yet', async () => {
+    const notify = jest.fn();
+    const cashOrder = { ...eligibleOrder, payment_method: 'cash', payment_status: 'unpaid', delivery_quote_status: 'pending' };
+    const { service } = createService(cashOrder, notify);
 
     await service.notifyConfirmed('order-1');
 

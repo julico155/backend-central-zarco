@@ -52,6 +52,7 @@ describeIfDb('OrderReplacementService vs PaymentAttemptsService (integración, c
       {} as never,
       {} as never,
       config,
+      noopDeliveryNotices,
     );
     paymentAttempts = new PaymentAttemptsService(db, noop, cashRegister, noopDeliveryNotices);
     replacement = new OrderReplacementService(

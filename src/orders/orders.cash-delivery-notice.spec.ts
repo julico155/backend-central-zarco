@@ -78,6 +78,7 @@ function createService() {
     { assertOpenSessionId: jest.fn().mockResolvedValue('register-1') } as never,
     {} as never,
     {} as never,
+    {} as never,
   );
   return { service, notifications, updateOrder };
 }

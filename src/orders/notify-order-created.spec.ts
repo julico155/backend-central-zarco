@@ -43,6 +43,7 @@ function createService() {
     {} as never,
     {} as never,
     config as never,
+    {} as never,
   );
   return { service, notifications, config };
 }
@@ -115,13 +116,55 @@ describe('OrdersService.notifyOrderCreated', () => {
       payload: {
         customerId: 'customer-1',
         messageType: 'cash_on_delivery_confirmation',
-        context: { orderNumber: 'ORD-260929-007', deliveryType: 'pickup', totalAmount: 42 },
+        context: {
+          orderNumber: 'ORD-260929-007',
+          deliveryType: 'pickup',
+          subtotalAmount: 42,
+          deliveryBaseAmount: 0,
+          deliverySurchargeAmount: 0,
+          deliveryAmount: 0,
+          totalAmount: 42,
+        },
       },
     });
     // Nunca genera/manda un QR para un pedido en efectivo.
     expect(notifications.notifyNow).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'qr_confirmation' }),
     );
+  });
+
+  it('sends the full delivery breakdown (subtotal, envío, recargo) for a cash delivery order', async () => {
+    const { service, notifications } = createService();
+
+    await notifyOrderCreated(service, {
+      ...baseOrder,
+      status: 'confirmed',
+      deliveryType: 'delivery',
+      paymentMethod: 'cash',
+      subtotalAmount: 42,
+      deliveryBaseAmount: 10,
+      deliverySurchargeAmount: 3,
+      totalAmount: 55,
+    });
+
+    expect(notifications.notifyNow).toHaveBeenCalledWith({
+      channel: 'whatsapp',
+      kind: 'cash_on_delivery_confirmation',
+      targetRef: 'order-1',
+      payload: {
+        customerId: 'customer-1',
+        messageType: 'cash_on_delivery_confirmation',
+        context: {
+          orderNumber: 'ORD-260929-007',
+          deliveryType: 'delivery',
+          subtotalAmount: 42,
+          deliveryBaseAmount: 10,
+          deliverySurchargeAmount: 3,
+          deliveryAmount: 13,
+          totalAmount: 55,
+        },
+      },
+    });
   });
 
   it('a failed gateway on location_request does not throw (best-effort)', async () => {

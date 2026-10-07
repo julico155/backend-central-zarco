@@ -29,6 +29,7 @@ import { DeliveryService, OrderQuoteResponse } from '../delivery/delivery.servic
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
 import { QrPaymentsService } from '../bank-qr/qr-payments.service';
+import { DeliveryNoticesService } from '../delivery-notices/delivery-notices.service';
 import type { WhatsappMessagePayload } from '../gateway-client/gateway-client.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { normalizePhone } from '../customers/normalize-phone';
@@ -155,6 +156,7 @@ export class OrdersService {
     private readonly cashRegister: CashRegisterService,
     private readonly qrPayments: QrPaymentsService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly deliveryNotices: DeliveryNoticesService,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -372,6 +374,10 @@ export class OrdersService {
             context: {
               orderNumber: order.orderNumber,
               deliveryType: order.deliveryType as 'delivery' | 'pickup' | 'dine_in',
+              subtotalAmount: order.subtotalAmount,
+              deliveryBaseAmount: order.deliveryBaseAmount,
+              deliverySurchargeAmount: order.deliverySurchargeAmount,
+              deliveryAmount: order.deliveryBaseAmount + order.deliverySurchargeAmount,
               totalAmount: order.totalAmount,
             },
           },
@@ -431,15 +437,21 @@ export class OrdersService {
   }
 
   /**
-   * Dispara el QR recién cotizado: lo llaman `attachLocation` y
-   * `AgentLocationsService` fuera de su transacción (mismo motivo que
-   * `notifyOrderCreated` — la llamada al banco no puede sostener el trx
-   * abierto), y solo cuando `quoteForOrderInTransaction`/`setManualQuote`
-   * acaban de congelar el total (`result === 'applied'`), nunca en un replay.
+   * Dispara el aviso de cobro (QR o efectivo) recién cotizado: lo llaman
+   * `attachLocation` y `AgentLocationsService` fuera de su transacción (mismo
+   * motivo que `notifyOrderCreated` — la llamada al banco no puede sostener
+   * el trx abierto), y solo cuando `quoteForOrderInTransaction`/
+   * `setManualQuote` acaban de congelar el total (`result === 'applied'`),
+   * nunca en un replay. De paso, único punto que cubre a los dos callers para
+   * avisarle al grupo de delivery un pedido en efectivo recién cotizado —
+   * `notifyConfirmed` no hace nada si el pedido no es cash/paid, así que para
+   * QR este llamado es un no-op idéntico al de siempre (recién pagado avisa
+   * desde `payment-attempts.service.ts`).
    */
   async sendQrConfirmationAfterQuote(orderId: string): Promise<void> {
     const order = await this.findById(orderId);
     await this.sendQrConfirmation(order);
+    await this.deliveryNotices.notifyConfirmed(orderId);
   }
 
   /**

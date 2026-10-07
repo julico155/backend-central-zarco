@@ -67,7 +67,7 @@ describe('delivery notice', () => {
   it('uses the cash collection layout without HTML', () => {
     const text = buildDeliveryNotice({ ...base, isCash: true });
 
-    expect(text).toContain('QUIERE EFECTIVO');
+    expect(text).toContain('PEDIDO EN EFECTIVO');
     expect(text).toContain('Productos: Bs 42');
     expect(text).toContain('TOTAL A COBRAR: Bs 55');
     expect(text).not.toContain('COBRAR ENVÍO');

@@ -15,9 +15,13 @@ export class DeliveryNoticesService {
   ) {}
 
   /**
-   * Best-effort y siempre posterior al commit de pago. La elegibilidad se
-   * vuelve a comprobar aquí para que una pata QR de un split nunca anuncie un
-   * pedido que aún no está completamente pagado.
+   * Best-effort. Para QR/split, siempre posterior al commit de pago — la
+   * elegibilidad se vuelve a comprobar aquí para que una pata QR de un split
+   * nunca anuncie un pedido que aún no está completamente pagado. Para
+   * payment_method='cash' no hay pago que esperar (se cobra contra entrega):
+   * alcanza con que la cotización ya sea definitiva, por eso este método
+   * también se llama justo después de cotizar (ver
+   * `OrdersService.sendQrConfirmationAfterQuote`), no solo tras el pago.
    */
   async notifyConfirmed(orderId: string): Promise<void> {
     try {
@@ -53,7 +57,7 @@ export class DeliveryNoticesService {
       if (
         order.delivery_type !== 'delivery' ||
         order.delivery_quote_status !== 'quoted' ||
-        order.payment_status !== 'paid' ||
+        (order.payment_method !== 'cash' && order.payment_status !== 'paid') ||
         order.latitude === null ||
         order.longitude === null
       ) {

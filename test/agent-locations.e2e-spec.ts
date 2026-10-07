@@ -121,6 +121,7 @@ describeIfDb('Ubicación de pedidos y cotización sin pedido (integración)', ()
       {} as never,
       {} as never,
       { get: () => 10 } as unknown as ConfigService<AppConfig, true>,
+      { notifyConfirmed: async () => undefined } as never,
     );
     agent = new AgentLocationsService(
       db,

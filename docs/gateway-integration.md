@@ -199,9 +199,10 @@ repartidor; el sistema no lo cuadra.
 **`paymentMethod: "cash"`** — todo el pedido (comida + envío) se cobra en
 efectivo al entregar (o al retirar, si es pickup), no hay QR de por medio.
 En vez de `qr_confirmation` te llega `messageType:
-"cash_on_delivery_confirmation"` con el `totalAmount` ya definitivo (mismo
-momento que el QR: apenas se crea para pickup/mesa, recién tras cotizar para
-delivery). Cocina puede empezar a preparar **sin que `payment_status` sea
+"cash_on_delivery_confirmation"` con el desglose completo (`subtotalAmount`,
+`deliveryBaseAmount`, `deliverySurchargeAmount`, `deliveryAmount`,
+`totalAmount`) ya definitivo (mismo momento que el QR: apenas se crea para
+pickup/mesa, recién tras cotizar para delivery). Cocina puede empezar a preparar **sin que `payment_status` sea
 `paid` todavía** — eso es intencional, el cobro pasa al entregar. Si el
 cliente no paga al recibir, el pedido se entrega igual (el negocio se lo
 cobra al repartidor después, fuera del sistema) — nunca se bloquea la
@@ -365,7 +366,7 @@ devolvé cualquier string único y estable para ese envío.
 | `order_received` | Pickup/mesa al crear el pedido (delivery no lo recibe, ver `location_request`) | `{ orderNumber, deliveryType }` |
 | `qr_confirmation` | QR real generado con éxito (pickup/mesa al crear; delivery recién tras cotizar) | `{ orderNumber, currency: "BOB", deliveryType, items[], promotions[], subtotalAmount, deliveryBaseAmount, deliverySurchargeAmount, deliveryAmount, totalAmount, qrAmount }` + `imageUrl` |
 | `payment_proof_request` | El banco falló al generar el QR real: fallback, se pide pagar y mandar captura | `{ orderNumber, qrAmount }` |
-| `cash_on_delivery_confirmation` | `paymentMethod: "cash"`: total definitivo a cobrar contra entrega (comida + envío), mismo momento que `qr_confirmation` | `{ orderNumber, deliveryType, totalAmount }` |
+| `cash_on_delivery_confirmation` | `paymentMethod: "cash"`: desglose definitivo a cobrar contra entrega (comida + envío), mismo momento que `qr_confirmation` | `{ orderNumber, deliveryType, subtotalAmount, deliveryBaseAmount, deliverySurchargeAmount, deliveryAmount, totalAmount }` |
 | `payment_confirmed` | Pago aceptado (QR o efectivo). `fullyPaid: false` solo en un `split` cuando la pata QR entró pero la pata efectivo todavía no | `{ orderNumber, deliveryType, fullyPaid }` |
 | `payment_rejected` | El comprobante/pago fue rechazado | `{ orderNumber, deliveryType }` |
 | `order_expired_unpaid` | El pedido se cancela solo por no pagarse en el TTL (20 min) | `{ orderNumber }` |
