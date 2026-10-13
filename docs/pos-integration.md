@@ -136,7 +136,7 @@ Idempotency-Key: <uuid nuevo por cada intento de venta>
 ```
 
 Límites del carrito: hasta 20 productos sueltos y 10 promociones, `quantity`
-entre 1 y 10 por línea, y **sin `promotionId` repetidos**. Para `items`, lo
+entre 1 y 30 por línea, y **sin `promotionId` repetidos**. Para `items`, lo
 que no puede repetirse es la combinación exacta `productId` + selección de
 complementos excluidos — dos líneas del mismo producto son válidas si tienen
 distinta selección (ver abajo), pero repetir la misma combinación en dos

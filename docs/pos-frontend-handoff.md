@@ -64,7 +64,7 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   cuadra solo por sí mismo con `subtotalAmount` cuando hay combos — hay que
   sumar también `promotions[].subtotal`. Verificado en producción.
 - **Carrito sin duplicados**: no se puede mandar el mismo `productId` dos
-  veces — consolidá en una sola línea, `quantity` 1-10. Más de 10 unidades
+  veces — consolidá en una sola línea, `quantity` 1-30. Más de 30 unidades
   del mismo producto es inexpresable.
 - **`Idempotency-Key`**: UUID v4 generado al abrir el carrito (no en el clic
   de confirmar — un doble clic con key nueva cobra dos veces). Mismo uuid en
