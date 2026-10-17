@@ -1449,8 +1449,11 @@ export class OrdersService {
    * Cancela los pedidos que siguen sin pagar pasado `ttlMinutes` (WhatsApp y
    * POS por igual): cocina no puede empezar un pedido impago, así que no tiene
    * sentido dejarlos vivos. Se salvan los que ya tienen algo cobrado (una pata
-   * de split, un pago bancario detectado) y el contra entrega en efectivo, que
-   * se cobra al llegar. Devuelve cuántos canceló.
+   * de split, un pago bancario detectado) y `payment_method='cash'` — ese se
+   * cobra recién al entregar/retirar, nunca antes, así que no tiene un TTL que
+   * vencer acá (quedó excluido también de `cancellable` en la práctica: si
+   * cocina tarda en moverlo a `preparing`, no debe desaparecer solo). Devuelve
+   * cuántos canceló.
    */
   async expireUnpaidOrders(ttlMinutes: number): Promise<number> {
     const cancellable: OrderStatus[] = ['draft', 'awaiting_location', 'confirmed'];
@@ -1461,6 +1464,7 @@ export class OrdersService {
       .select(['id', 'order_number', 'customer_id', 'channel', 'payment_method'])
       .where('status', 'in', cancellable)
       .where('payment_status', '=', 'unpaid')
+      .where('payment_method', '!=', 'cash')
       .where('created_at', '<', cutoff)
       .where('cash_confirmed_at', 'is', null)
       .where('split_cash_confirmed_at', 'is', null)
