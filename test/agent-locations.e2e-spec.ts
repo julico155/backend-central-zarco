@@ -70,6 +70,7 @@ describeIfDb('Ubicación de pedidos y cotización sin pedido (integración)', ()
       quote?: 'pending' | 'failed' | 'pending_manual';
       coords?: { latitude: number; longitude: number };
       minutesOld?: number;
+      paymentMethod?: 'qr' | 'cash';
     } = {},
   ) {
     const row = await db
@@ -80,7 +81,7 @@ describeIfDb('Ubicación de pedidos y cotización sin pedido (integración)', ()
         channel: 'whatsapp',
         customer_name: 'e2e-loc',
         delivery_type: 'delivery',
-        payment_method: 'qr',
+        payment_method: opts.paymentMethod ?? 'qr',
         status: opts.status ?? 'awaiting_location',
         subtotal_amount: '50.00',
         total_amount: '50.00',
@@ -190,6 +191,15 @@ describeIfDb('Ubicación de pedidos y cotización sin pedido (integración)', ()
         expect(o.delivery_latitude).toBeNull();
         expect(o.status).not.toBe('confirmed');
       }
+    });
+
+    it('attached: un pedido en efectivo pasado el TTL (37 min) igual se encuentra y se cotiza — nunca expira, a diferencia del QR', async () => {
+      stubMeters = 1000;
+      const c = await newCustomer();
+      const id = await newOrder(c.id, { minutesOld: 37, paymentMethod: 'cash' });
+      const res = await attach(c.waId, A, 'cash-ttl-1');
+      expect(res).toMatchObject({ result: 'attached', orderId: id });
+      expect(await readOrder(id)).toMatchObject({ status: 'confirmed', delivery_quote_status: 'quoted' });
     });
 
     it('ambiguous_order: 2 pedidos esperando ubicación, no elige ninguno y no guarda nada', async () => {

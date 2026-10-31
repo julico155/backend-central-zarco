@@ -115,6 +115,14 @@ export class AgentLocationsService {
     // pagar. El cron de vencimiento corre cada 30 s, así que un pedido recién
     // vencido puede seguir en awaiting_location unos segundos: no se revive.
     // El TTL se compara con el reloj de la base, no con el del proceso.
+    //
+    // payment_method='cash' queda excluido del TTL (igual que en
+    // OrdersService.expireUnpaidOrders): ese pedido se cobra al entregar/
+    // retirar, nunca antes, así que nunca lo cancela el cron — y por lo tanto
+    // tampoco puede expirar acá. Sin esta excepción, un pedido en efectivo
+    // real (p.ej. porque la notificación de location_request tardó en
+    // reintentarse) queda invisible para attach aunque replaceable siga
+    // devolviéndolo como awaiting_location — contradicción real, no cosmética.
     const ttlMinutes = this.config.get('unpaidOrderTtlMinutes', { infer: true });
     const waiting: OrderRow[] = await trx
       .selectFrom('orders')
@@ -130,7 +138,12 @@ export class AgentLocationsService {
       .where('customer_id', '=', customer.id)
       .where('delivery_type', '=', 'delivery')
       .where('status', '=', 'awaiting_location')
-      .where(sql<boolean>`created_at > now() - (${ttlMinutes} * interval '1 minute')`)
+      .where((eb) =>
+        eb.or([
+          eb('payment_method', '=', 'cash'),
+          sql<boolean>`created_at > now() - (${ttlMinutes} * interval '1 minute')`,
+        ]),
+      )
       .orderBy('created_at', 'asc')
       .forUpdate()
       .execute();
