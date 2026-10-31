@@ -6,9 +6,13 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiQuery } from '@nestjs/swagger';
 import { ServiceOrStaffAuthGuard } from '../common/guards/service-or-staff-auth.guard';
+import { ApiClient } from '../common/decorators/api-client.decorator';
+import { resolveCatalogChannel } from '../common/channel-visibility';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -24,8 +28,9 @@ export class PromotionsController {
 
   @Get()
   @UseGuards(ServiceOrStaffAuthGuard)
-  findAll() {
-    return this.promotions.findAll();
+  @ApiQuery({ name: 'channel', required: false, enum: ['whatsapp', 'pos'] })
+  findAll(@ApiClient() apiClient: string, @Query('channel') channel?: string) {
+    return this.promotions.findAll(resolveCatalogChannel(apiClient, channel));
   }
 
   @Get(':id')

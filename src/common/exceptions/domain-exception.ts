@@ -24,7 +24,7 @@ export class ValidationError extends DomainException {
 export class ProductUnavailableError extends DomainException {
   constructor(
     productId: string,
-    reason: 'inactive' | 'sold_out',
+    reason: 'inactive' | 'sold_out' | 'not_in_channel',
     unavailableProductIds?: string[],
   ) {
     super(

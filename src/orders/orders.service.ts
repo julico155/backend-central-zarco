@@ -22,6 +22,7 @@ import {
   StoreClosedError,
   ValidationError,
 } from '../common/exceptions/domain-exception';
+import { catalogChannelOfOrder, SELL_ON_COLUMN } from '../common/channel-visibility';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { checkoutGateAt, lateRequestExpiryFor } from '../common/time/service-window';
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
@@ -598,6 +599,13 @@ export class OrdersService {
         : [];
     const promotionById = new Map(promotionRows.map((p) => [p.id, p]));
 
+    // Visibilidad por canal: aplica a lo que se vende SUELTO y a la promoción
+    // en sí, nunca a los componentes de un combo (un producto puede estar
+    // apagado suelto en un canal y aun así venderse dentro de su combo).
+    const catalogChannel = catalogChannelOfOrder(input.channel);
+    const soldInChannel = (row: { sell_on_whatsapp: boolean; sell_on_pos: boolean }) =>
+      catalogChannel === undefined || row[SELL_ON_COLUMN[catalogChannel]] === true;
+
     const badPromotionIds = new Set<string>();
     for (const p of promotions) {
       const row = promotionById.get(p.promotionId);
@@ -605,6 +613,7 @@ export class OrdersService {
         !row ||
         row.archived_at !== null ||
         row.is_active !== true ||
+        !soldInChannel(row) ||
         (row.starts_at !== null && new Date(row.starts_at) > now) ||
         (row.ends_at !== null && new Date(row.ends_at) <= now) ||
         row.revision !== p.revision
@@ -686,6 +695,13 @@ export class OrdersService {
     const inactiveLooseItem = items.find((i) => inactiveProductIds.has(i.productId));
     if (inactiveLooseItem) {
       throw new ProductUnavailableError(inactiveLooseItem.productId, 'inactive');
+    }
+    const outOfChannelLooseItem = items.find((i) => {
+      const row = productById.get(i.productId);
+      return row !== undefined && !soldInChannel(row);
+    });
+    if (outOfChannelLooseItem) {
+      throw new ProductUnavailableError(outOfChannelLooseItem.productId, 'not_in_channel');
     }
     const soldOutLooseItemIds = items
       .filter((i) => soldOutProductIds.has(i.productId))

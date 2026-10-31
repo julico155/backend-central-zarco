@@ -32,6 +32,8 @@ export interface ProductsTable {
   price: string; // numeric(10,2) llega como string del driver pg
   is_active: Generated<boolean>;
   is_available: Generated<boolean>;
+  sell_on_whatsapp: Generated<boolean>;
+  sell_on_pos: Generated<boolean>;
   sort_order: Generated<number>;
   image_key: string | null;
   image_mime_type: string | null;
@@ -327,6 +329,8 @@ export interface PromotionsTable {
   is_active: Generated<boolean>;
   starts_at: Timestamp | null;
   ends_at: Timestamp | null;
+  sell_on_whatsapp: Generated<boolean>;
+  sell_on_pos: Generated<boolean>;
   sort_order: Generated<number>;
   image_url: string | null;
   archived_at: Timestamp | null;

@@ -2,6 +2,7 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database } from '../database/types';
+import { CatalogChannel, SELL_ON_COLUMN } from '../common/channel-visibility';
 import {
   DomainException,
   NotFoundDomainError,
@@ -36,6 +37,10 @@ export interface ProductResponse {
   price: number;
   isActive: boolean;
   isAvailable: boolean;
+  /** Se vende SUELTO por WhatsApp. Apagado no impide venderlo dentro de un combo. */
+  sellOnWhatsapp: boolean;
+  /** Se vende SUELTO en el POS. Apagado no impide venderlo dentro de un combo. */
+  sellOnPos: boolean;
   sortOrder: number;
   /** Ruta relativa al backend, no una URL directa al bucket — mismo criterio que payment-proofs. Null si el producto no tiene foto. */
   imageUrl: string | null;
@@ -56,9 +61,10 @@ export class ProductsService {
    * reactivar uno: sin eso, desactivarlo lo vuelve irrecuperable desde la
    * UI. Sold-out ≠ inactivo (invariante 4) — `isAvailable` no se toca acá.
    */
-  async findMany(includeInactive = false): Promise<ProductResponse[]> {
+  async findMany(includeInactive = false, channel?: CatalogChannel): Promise<ProductResponse[]> {
     let query = this.db.selectFrom('products').selectAll();
     if (!includeInactive) query = query.where('is_active', '=', true);
+    if (channel) query = query.where(SELL_ON_COLUMN[channel], '=', true);
     const rows = await query.orderBy('sort_order', 'asc').execute();
     if (rows.length === 0) return [];
 
@@ -90,6 +96,8 @@ export class ProductsService {
             price: dto.price.toFixed(2),
             is_active: dto.isActive,
             is_available: dto.isAvailable,
+            sell_on_whatsapp: dto.sellOnWhatsapp,
+            sell_on_pos: dto.sellOnPos,
             sort_order: dto.sortOrder,
           })
           .returningAll()
@@ -120,6 +128,8 @@ export class ProductsService {
           ...(dto.categoryId !== undefined ? { category_id: dto.categoryId } : {}),
           ...(dto.price !== undefined ? { price: dto.price.toFixed(2) } : {}),
           ...(dto.isActive !== undefined ? { is_active: dto.isActive } : {}),
+          ...(dto.sellOnWhatsapp !== undefined ? { sell_on_whatsapp: dto.sellOnWhatsapp } : {}),
+          ...(dto.sellOnPos !== undefined ? { sell_on_pos: dto.sellOnPos } : {}),
           ...(dto.sortOrder !== undefined ? { sort_order: dto.sortOrder } : {}),
           updated_at: new Date(),
         })
@@ -247,6 +257,8 @@ function toProductResponse(
     price: string;
     is_active: boolean;
     is_available: boolean;
+    sell_on_whatsapp: boolean;
+    sell_on_pos: boolean;
     sort_order: number;
     image_key: string | null;
   },
@@ -261,6 +273,8 @@ function toProductResponse(
     price: Number(row.price),
     isActive: row.is_active,
     isAvailable: row.is_available,
+    sellOnWhatsapp: row.sell_on_whatsapp,
+    sellOnPos: row.sell_on_pos,
     sortOrder: row.sort_order,
     imageUrl: row.image_key ? `/products/${row.id}/image` : null,
     complements: complements.map((c) => ({ id: c.id, name: c.name, sortOrder: c.sort_order })),

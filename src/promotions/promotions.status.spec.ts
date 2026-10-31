@@ -12,6 +12,8 @@ function basePromotion(overrides: Partial<PromotionRow> = {}): PromotionRow {
     ends_at: null,
     sort_order: 0,
     image_url: null,
+    sell_on_whatsapp: true,
+    sell_on_pos: true,
     revision: 1,
     ...overrides,
   };

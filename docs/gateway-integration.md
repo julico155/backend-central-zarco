@@ -56,6 +56,16 @@ correspondiente al armar el pedido (ver 2.3). Un producto sin complementos
 configurados trae `complements: []` — no le preguntes nada al cliente en
 ese caso.
 
+**Visibilidad por canal**: `GET /products` y `GET /promotions` con tu token ya
+vienen filtrados a lo que se vende por WhatsApp (el staff decide qué se
+muestra en cada canal). No hay que mandar nada nuevo ni cambiar el parseo: la
+respuesta tiene la misma forma, solo puede traer menos ítems. Un producto
+puede no venir suelto y aun así formar parte de una promoción que sí viene
+(ej. combo salchipapa + soda). Si mandás igual un producto o promoción no
+habilitada para WhatsApp, `POST /orders` da `409 product_unavailable`
+(`details.reason = "not_in_channel"`) o `409 promotion_unavailable`.
+
+
 ### 2.3 Crear pedido
 
 ```

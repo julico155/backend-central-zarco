@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   ArrayMinSize,
   IsArray,
   IsISO8601,
@@ -48,4 +49,12 @@ export class UpdatePromotionDto {
   @IsOptional()
   @IsUrl()
   imageUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  sellOnWhatsapp?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  sellOnPos?: boolean;
 }
