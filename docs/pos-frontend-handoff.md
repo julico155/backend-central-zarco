@@ -147,6 +147,13 @@ tanto un JWT de staff como un token de servicio — el POS usa siempre el JWT.
   reintentar, no mostrar error rojo. El segundo es un salto de estado ilegal.
 - **`status` y `paymentStatus` son independientes** — nada impide un pedido
   `delivered` + `unpaid`. Marcalo visualmente, el backend no avisa.
+- **Cierre automático de fin de jornada**: todo pedido que siga en
+  `confirmed`/`preparing`/`ready`/`out_for_delivery` de antes del último
+  cierre (`business_closes_hour`) pasa solo a `delivered` (nunca toca
+  `paymentStatus`, nunca afirma que se cobró). Es un salto directo que
+  salta los pasos intermedios — si ves un pedido viejo en `delivered` sin
+  haber pasado visualmente por `ready`/`out_for_delivery`, es este cierre,
+  no un bug del tablero.
 - **Errores**: forma uniforme `{code, message, details}`, salvo los 400 de
   class-validator donde `message` es un **array** de strings, no string.
 - **Mantenimiento de menú**: `isAvailable` no se puede mandar a

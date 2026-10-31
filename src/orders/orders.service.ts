@@ -1555,6 +1555,36 @@ export class OrdersService {
     }
     return expired;
   }
+
+  /**
+   * Cierre forzado de fin de jornada: todo lo que quedó en cocina/reparto
+   * (confirmed/preparing/ready/out_for_delivery) creado ANTES del último
+   * cruce de `closesHour` pasa a `delivered`. Nunca toca `payment_status`
+   * — esto es solo el status operativo que ve cocina/POS, no afirma que se
+   * cobró nada; el cuadre de caja sigue siendo responsabilidad humana.
+   *
+   * Decisión explícita y deliberada: `closesHour` es un margen ANCHO de
+   * cordura, no la hora de cierre real (ver cabecera de service-window.ts
+   * — el horario real varía ±1h noche a noche y el corte de verdad es si
+   * la caja sigue abierta). Usar `closesHour` acá puede cerrar pedidos que
+   * siguen genuinamente en curso una noche que el local se extiende. Se
+   * usa así a pedido explícito, no por descuido.
+   */
+  async autoCompletePendingKitchenOrders(cutoff: Date): Promise<number> {
+    const pending: OrderStatus[] = ['confirmed', 'preparing', 'ready', 'out_for_delivery'];
+    const result = await this.db
+      .updateTable('orders')
+      .set({
+        status: 'delivered',
+        delivered_at: new Date(),
+        status_updated_by: 'system:auto-close',
+        updated_at: new Date(),
+      })
+      .where('status', 'in', pending)
+      .where('created_at', '<', cutoff)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0);
+  }
 }
 
 function toLateOrderRequestAcceptedResponse(row: {

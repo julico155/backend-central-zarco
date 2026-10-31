@@ -103,6 +103,24 @@ export function startOfBoliviaDay(date: string): Date {
   return new Date(`${date}T00:00:00-04:00`);
 }
 
+/**
+ * Último instante en el pasado (relativo a `now`) en que el reloj de
+ * Bolivia marcó `closesHour:00`. Si todavía no llegó hoy, devuelve el de
+ * ayer. Usado por KitchenAutoCompleteCron como corte: cualquier pedido
+ * creado ANTES de ese cruce es "de antes del cierre" y se completa; uno
+ * creado después (aunque el reloj ya marque la hora de cierre) espera al
+ * cruce siguiente — así un cron que corre cada minuto no vuelve a tocar
+ * pedidos nuevos durante toda la hora de `closesHour`, sin necesitar una
+ * bandera de "ya corrí hoy" en ningún lado.
+ */
+export function lastClosesHourCrossing(now: Date, closesHour: number): Date {
+  const today = dateInBolivia(now);
+  const todayCrossing = new Date(startOfBoliviaDay(today).getTime() + closesHour * 60 * 60 * 1000);
+  if (todayCrossing.getTime() <= now.getTime()) return todayCrossing;
+  const yesterday = dateInBolivia(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  return new Date(startOfBoliviaDay(yesterday).getTime() + closesHour * 60 * 60 * 1000);
+}
+
 export const LATE_REQUEST_TTL_MS = 20 * 60 * 1000; // 20 minutos, alineado con unpaidOrderTtlMinutes
 
 export function lateRequestExpiryFor(instant: Date): Date {

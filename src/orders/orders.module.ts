@@ -10,6 +10,7 @@ import { DeliveryNoticesModule } from '../delivery-notices/delivery-notices.modu
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
+import { KitchenAutoCompleteCron } from './kitchen-auto-complete.cron';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { UnpaidOrdersExpiryCron } from './unpaid-orders-expiry.cron';
     DeliveryNoticesModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, UnpaidOrdersExpiryCron],
+  providers: [OrdersService, UnpaidOrdersExpiryCron, KitchenAutoCompleteCron],
   exports: [OrdersService],
 })
 export class OrdersModule {}
