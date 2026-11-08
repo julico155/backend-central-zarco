@@ -15,7 +15,15 @@ async function bootstrap() {
   // el parser default acá, éste igual intercepta el request antes de que
   // corra el de abajo, y el límite chico sigue aplicando.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
-  app.use(json({ limit: '10mb' }));
+  // El webhook de reparto se firma sobre el cuerpo crudo: se conserva solo para esa ruta.
+  app.use(
+    json({
+      limit: '10mb',
+      verify: (req: { url?: string; rawBody?: Buffer }, _res, buf) => {
+        if (req.url?.startsWith('/integrations/smarky/webhook')) req.rawBody = buf;
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   const config = app.get(ConfigService<AppConfig, true>);

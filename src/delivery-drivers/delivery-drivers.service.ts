@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Kysely, sql } from 'kysely';
+import { ExpressionBuilder, Kysely, sql } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database, OrderPromotionComponentSnapshot } from '../database/types';
 import { AppConfig } from '../config/configuration';
@@ -74,6 +74,18 @@ const iso = (value: Date | string | null): string | null =>
  * llegar los marca entregados. Las reglas de negocio (radio, quién puede
  * mover qué) viven en `delivery-drivers.rules.ts`.
  */
+/**
+ * Con DELIVERY_PROVIDER=smarky la plataforma central toma el pedido: los repartidores propios
+ * no deben verlo ni aceptarlo. Si la plataforma lo abandona (cancelled / failed) vuelve a estar
+ * disponible. Con el proveedor interno `smarky_delivery_status` siempre es null: sin efecto.
+ */
+export function notHandledByPlatform(eb: ExpressionBuilder<Database, 'orders'>) {
+  return eb.or([
+    eb('smarky_delivery_status', 'is', null),
+    eb('smarky_delivery_status', 'in', ['cancelled', 'failed']),
+  ]);
+}
+
 @Injectable()
 export class DeliveryDriversService {
   private readonly distance = new HaversineDistanceService();
@@ -100,6 +112,7 @@ export class DeliveryDriversService {
       .where('status', '=', 'ready')
       .where('delivery_type', '=', 'delivery')
       .where('delivery_driver_id', 'is', null)
+      .where(notHandledByPlatform)
       .orderBy('updated_at', 'asc')
       .execute();
     if (orders.length === 0) return [];
@@ -339,6 +352,7 @@ export class DeliveryDriversService {
       .where('status', '=', 'ready')
       .where('delivery_type', '=', 'delivery')
       .where('delivery_driver_id', 'is', null)
+      .where(notHandledByPlatform)
       .returning('id')
       .executeTakeFirst();
 

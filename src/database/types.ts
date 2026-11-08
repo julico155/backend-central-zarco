@@ -127,6 +127,10 @@ export interface OrdersTable {
   replaces_order_id: string | null;
   /** Inverso de replaces_order_id — null hasta que alguien lo reemplaza; un pedido solo se reemplaza una vez (índice único parcial). */
   replaced_by_order_id: string | null;
+  /** Integración con la plataforma de reparto (DELIVERY_PROVIDER=smarky). Null con el proveedor interno. */
+  smarky_delivery_id: string | null;
+  smarky_tracking_url: string | null;
+  smarky_delivery_status: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -416,6 +420,13 @@ export interface NotificationJobsTable {
   updated_at: Timestamp;
 }
 
+export interface SmarkyWebhookEventsTable {
+  event_id: string;
+  delivery_id: string;
+  event_type: string;
+  received_at: Generated<Date>;
+}
+
 export interface Database {
   categories: CategoriesTable;
   products: ProductsTable;
@@ -437,4 +448,5 @@ export interface Database {
   operational_settings: OperationalSettingsTable;
   dashboard_users: DashboardUsersTable;
   notification_jobs: NotificationJobsTable;
+  smarky_webhook_events: SmarkyWebhookEventsTable;
 }

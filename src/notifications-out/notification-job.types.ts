@@ -2,6 +2,7 @@ import {
   TelegramAlertPayload,
   WhatsappLocationRequestPayload,
   WhatsappMessagePayload,
+  WhatsappTextPayload,
 } from '../gateway-client/gateway-client.service';
 
 /**
@@ -11,7 +12,7 @@ import {
  * | 'handoff_notice' | 'late_request_alert' | ...
  */
 export type NotificationJobPayload =
-  | { channel: 'whatsapp'; kind: string; targetRef: string; payload: WhatsappMessagePayload }
+  | { channel: 'whatsapp'; kind: string; targetRef: string; payload: WhatsappMessagePayload | WhatsappTextPayload }
   | {
       channel: 'whatsapp';
       kind: 'location_request';

@@ -75,6 +75,15 @@ export type CustomerMessageIntent =
 
 export type WhatsappMessagePayload = { customerId: string } & CustomerMessageIntent;
 
+/**
+ * Texto ya armado (el gateway lo acepta sin messageType). Solo para el link de seguimiento
+ * de la plataforma de reparto, que lleva datos que el copy del agente no conoce.
+ */
+export interface WhatsappTextPayload {
+  customerId: string;
+  text: string;
+}
+
 export interface WhatsappLocationRequestPayload {
   customerId: string;
   reason?: string;
@@ -126,7 +135,7 @@ export class GatewayClientService {
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
 
   async sendWhatsappMessage(
-    payload: WhatsappMessagePayload,
+    payload: WhatsappMessagePayload | WhatsappTextPayload,
     notificationId?: string,
   ): Promise<WhatsappMessageResult> {
     return this.post<WhatsappMessageResult>(

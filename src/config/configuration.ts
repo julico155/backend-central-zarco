@@ -64,6 +64,15 @@ export interface AppConfig {
    * para pago (solo la creación del pedido).
    */
   aiTestPhones: string[];
+  delivery: {
+    /** `internal` = repartidores propios + grupo de Telegram (comportamiento original). `smarky` = plataforma central de reparto. */
+    provider: 'internal' | 'smarky';
+    smarky: {
+      baseUrl: string;
+      apiKey: string;
+      webhookSecret: string;
+    };
+  };
 }
 
 function parseServiceAuthTokens(raw: string | undefined): Record<string, string> {
@@ -146,4 +155,12 @@ export default (): AppConfig => ({
   unpaidOrderTtlMinutes:
     Number(process.env.UNPAID_ORDER_TTL_MINUTES) > 0 ? Number(process.env.UNPAID_ORDER_TTL_MINUTES) : 20,
   aiTestPhones: parseAiTestPhones(process.env.AI_TEST_PHONES),
+  delivery: {
+    provider: process.env.DELIVERY_PROVIDER?.trim().toLowerCase() === 'smarky' ? 'smarky' : 'internal',
+    smarky: {
+      baseUrl: (process.env.SMARKY_BASE_URL ?? '').trim().replace(/\/+$/, ''),
+      apiKey: process.env.SMARKY_API_KEY ?? '',
+      webhookSecret: process.env.SMARKY_WEBHOOK_SECRET ?? '',
+    },
+  },
 });

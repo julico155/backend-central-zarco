@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { KYSELY } from '../database/database.module';
 import { Database, OrderPromotionComponentSnapshot } from '../database/types';
+import { SmarkyDeliveryService } from '../delivery/smarky/smarky-delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { buildDeliveryNotice, DeliveryNoticeItem, mergeNoticeItems } from './delivery-notice';
 
@@ -12,6 +13,8 @@ export class DeliveryNoticesService {
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<Database>,
     private readonly notifications: NotificationsOutService,
+    /** Reparto por la plataforma central (DELIVERY_PROVIDER=smarky). Sin él, o con proveedor interno, todo sigue igual. */
+    @Optional() private readonly smarky?: SmarkyDeliveryService,
   ) {}
 
   /**
@@ -62,6 +65,14 @@ export class DeliveryNoticesService {
         order.longitude === null
       ) {
         return;
+      }
+
+      // Reparto por la plataforma central: si ella toma el pedido, el cliente recibe el link de
+      // seguimiento y NO se avisa al grupo de repartidores propios (no se avisa dos veces). Si la
+      // plataforma falla o no aplica, sigue el aviso al grupo de siempre para no perder el pedido.
+      if (this.smarky?.enabled) {
+        const dispatch = await this.smarky.dispatchForOrder(orderId);
+        if (dispatch === 'dispatched' || dispatch === 'in_progress') return;
       }
 
       const [orderItems, promotions] = await Promise.all([
