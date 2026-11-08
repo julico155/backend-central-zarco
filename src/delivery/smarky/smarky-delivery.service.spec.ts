@@ -265,6 +265,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
 describe('mensaje de seguimiento', () => {
   it('lleva el link y el código cuando hay código', () => {
     const texto = buildTrackingMessage({ orderNumber: 'ORD-276', trackingUrl: 'https://s.test/seguir/x', deliveryCode: '4821' });
+    expect(texto.startsWith('¡Listo! Tenemos tu pedido ORD-276 confirmado')).toBe(true);
     expect(texto).toContain('ORD-276');
     expect(texto).toContain('https://s.test/seguir/x');
     expect(texto).toContain('Código de entrega: 4821');

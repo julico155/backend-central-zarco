@@ -8,7 +8,7 @@ export function buildTrackingMessage(input: {
   deliveryCode: string | null;
 }): string {
   const lines = [
-    `Tu pedido ${input.orderNumber} ya está en camino de ser asignado a un repartidor.`,
+    `¡Listo! Tenemos tu pedido ${input.orderNumber} confirmado y ya pasa a cocina 🙌`,
     '',
     `Sigue tu pedido en vivo aquí: ${input.trackingUrl}`,
   ];

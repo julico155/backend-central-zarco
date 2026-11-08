@@ -13,6 +13,9 @@ import { SMARKY_DELIVERY_STATUSES, SmarkyDeliveryStatus, SmarkyWebhookEvent } fr
 
 export type SmarkyWebhookResult = 'processed' | 'duplicate' | 'unknown_order';
 
+/** Nombre con el que el monitor de delivery del POS muestra los pedidos que lleva la plataforma. */
+const PLATFORM_DRIVER_NAME = 'Plataforma de reparto';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -103,6 +106,11 @@ export class SmarkyWebhookService {
           ...(keepDeliveryStatus ? {} : { smarky_delivery_status: delivery.status }),
           ...(nextOrderStatus ? { status: nextOrderStatus, status_updated_by: 'smarky' } : {}),
           ...(nextOrderStatus === 'delivered' ? { delivered_at: now } : {}),
+          // Para que el monitor de delivery del POS muestre quién lo lleva y desde cuándo; no asigna
+          // delivery_driver_id, así que no entra en las pantallas de los repartidores propios.
+          ...(nextOrderStatus === 'out_for_delivery'
+            ? { delivery_driver_name: PLATFORM_DRIVER_NAME, delivery_accepted_at: now }
+            : {}),
           updated_at: now,
         })
         .where('id', '=', order.id)

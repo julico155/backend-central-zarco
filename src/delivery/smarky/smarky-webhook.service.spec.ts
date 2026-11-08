@@ -122,6 +122,7 @@ describe('SmarkyWebhookService', () => {
       smarky_tracking_url: 'https://seguimiento.test/seguir/abc',
       status: 'out_for_delivery',
       status_updated_by: 'smarky',
+      delivery_driver_name: 'Plataforma de reparto',
     });
   });
 

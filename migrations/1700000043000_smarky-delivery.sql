@@ -24,6 +24,7 @@ create table if not exists smarky_webhook_events (
 );
 
 alter table smarky_webhook_events enable row level security;
+drop policy if exists backend_full_access on smarky_webhook_events;
 create policy backend_full_access on smarky_webhook_events
   for all to current_user using (true) with check (true);
 
