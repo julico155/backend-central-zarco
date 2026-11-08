@@ -78,6 +78,7 @@ const iso = (value: Date | string | null): string | null =>
  * Con DELIVERY_PROVIDER=smarky la plataforma central toma el pedido: los repartidores propios
  * no deben verlo ni aceptarlo. Si la plataforma lo abandona (cancelled / failed) vuelve a estar
  * disponible. Con el proveedor interno `smarky_delivery_status` siempre es null: sin efecto.
+ * Solo se aplica con SMARKY_NOTIFY_OWN_DRIVERS=false; con true (default, transición) no oculta nada.
  */
 export function notHandledByPlatform(eb: ExpressionBuilder<Database, 'orders'>) {
   return eb.or([
@@ -96,6 +97,11 @@ export class DeliveryDriversService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
+  /** Default `true` (transición): los repartidores propios ven todo, como si la plataforma no existiera. */
+  private notifyOwnDrivers(): boolean {
+    return this.config.get('delivery', { infer: true })?.smarky?.notifyOwnDrivers ?? true;
+  }
+
   async listAvailable(): Promise<AvailableDeliveryOrder[]> {
     const orders = await this.db
       .selectFrom('orders')
@@ -112,7 +118,7 @@ export class DeliveryDriversService {
       .where('status', '=', 'ready')
       .where('delivery_type', '=', 'delivery')
       .where('delivery_driver_id', 'is', null)
-      .where(notHandledByPlatform)
+      .$if(!this.notifyOwnDrivers(), (qb) => qb.where(notHandledByPlatform))
       .orderBy('updated_at', 'asc')
       .execute();
     if (orders.length === 0) return [];
@@ -352,7 +358,7 @@ export class DeliveryDriversService {
       .where('status', '=', 'ready')
       .where('delivery_type', '=', 'delivery')
       .where('delivery_driver_id', 'is', null)
-      .where(notHandledByPlatform)
+      .$if(!this.notifyOwnDrivers(), (qb) => qb.where(notHandledByPlatform))
       .returning('id')
       .executeTakeFirst();
 

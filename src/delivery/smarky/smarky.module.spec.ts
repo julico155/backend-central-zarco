@@ -54,3 +54,15 @@ describe('SmarkyModule dentro de DeliveryNoticesModule (inyección real)', () =>
     expect(modulo.get(SmarkyWebhookService, { strict: false }).enabled).toBe(true);
   });
 });
+
+describe('SMARKY_NOTIFY_OWN_DRIVERS en el servicio de reparto', () => {
+  it('refleja la configuración', async () => {
+    for (const valor of [true, false]) {
+      const modulo = await armar({
+        provider: 'smarky',
+        smarky: { baseUrl: 'https://plataforma.test', apiKey: 'k', webhookSecret: 's', notifyOwnDrivers: valor },
+      });
+      expect(modulo.get(SmarkyDeliveryService, { strict: false }).notifyOwnDrivers).toBe(valor);
+    }
+  });
+});

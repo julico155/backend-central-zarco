@@ -70,9 +70,14 @@ export class DeliveryNoticesService {
       // Reparto por la plataforma central: si ella toma el pedido, el cliente recibe el link de
       // seguimiento y NO se avisa al grupo de repartidores propios (no se avisa dos veces). Si la
       // plataforma falla o no aplica, sigue el aviso al grupo de siempre para no perder el pedido.
+      let alsoOnPlatform = false;
       if (this.smarky?.enabled) {
         const dispatch = await this.smarky.dispatchForOrder(orderId);
-        if (dispatch === 'dispatched' || dispatch === 'in_progress') return;
+        if (dispatch === 'dispatched' || dispatch === 'in_progress') {
+          // Transición: con SMARKY_NOTIFY_OWN_DRIVERS=true el aviso al grupo sale igual (más una línea).
+          if (!this.smarky.notifyOwnDrivers) return;
+          alsoOnPlatform = true;
+        }
       }
 
       const [orderItems, promotions] = await Promise.all([
@@ -93,7 +98,7 @@ export class DeliveryNoticesService {
         ...promotionItems(promotions),
       ]);
       const deliveryAmount = Number(order.delivery_base_amount) + Number(order.delivery_surcharge_amount);
-      const text = buildDeliveryNotice({
+      const notice = buildDeliveryNotice({
         orderNumber: order.order_number,
         customerName: order.customer_name,
         customerPhone: order.customer_phone ?? '',
@@ -107,6 +112,8 @@ export class DeliveryNoticesService {
         longitude: order.longitude,
         distanceMeters: order.distance_meters,
       });
+      // Sin link ni código: Telegram es un grupo, no un canal privado con el cliente.
+      const text = alsoOnPlatform ? `${notice}\n\nTambién está en la plataforma de reparto.` : notice;
 
       await this.notifications.notifyNow({
         channel: 'telegram',

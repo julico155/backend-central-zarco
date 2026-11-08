@@ -71,6 +71,11 @@ export interface AppConfig {
       baseUrl: string;
       apiKey: string;
       webhookSecret: string;
+      /**
+       * Transición: con `smarky`, los pedidos siguen llegando también al grupo de Telegram y a la app de
+       * repartidores propios mientras la plataforma no tenga moto asignada. `false` = solo plataforma.
+       */
+      notifyOwnDrivers: boolean;
     };
   };
 }
@@ -161,6 +166,7 @@ export default (): AppConfig => ({
       baseUrl: (process.env.SMARKY_BASE_URL ?? '').trim().replace(/\/+$/, ''),
       apiKey: process.env.SMARKY_API_KEY ?? '',
       webhookSecret: process.env.SMARKY_WEBHOOK_SECRET ?? '',
+      notifyOwnDrivers: process.env.SMARKY_NOTIFY_OWN_DRIVERS?.trim().toLowerCase() !== 'false',
     },
   },
 });

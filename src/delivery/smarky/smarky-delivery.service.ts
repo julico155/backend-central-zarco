@@ -58,6 +58,11 @@ export class SmarkyDeliveryService implements OnModuleInit {
     return this.config.get('delivery', { infer: true }).provider === 'smarky' && this.client !== null;
   }
 
+  /** Transición: los repartidores propios siguen viendo el pedido hasta que la plataforma asigne moto. */
+  get notifyOwnDrivers(): boolean {
+    return this.config.get('delivery', { infer: true }).smarky.notifyOwnDrivers;
+  }
+
   /** Nunca lanza: cualquier fallo inesperado es `failed` y el pedido sigue por el flujo propio. */
   async dispatchForOrder(orderId: string): Promise<SmarkyDispatchResult> {
     try {

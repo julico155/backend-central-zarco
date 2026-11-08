@@ -17,11 +17,16 @@ Contrato de la plataforma: `smarky-delivery-platform/docs/openapi.yaml`.
    `SmarkyDeliveryService.dispatchForOrder`: cotiza con el pin, pide la entrega
    (`externalOrderId` = id del pedido, `orderLabel` = `ORD-N`) y guarda en `orders`
    `smarky_delivery_id`, `smarky_tracking_url`, `smarky_delivery_status`.
-2. Si la plataforma tomó el pedido **no se avisa al grupo de repartidores propios**
-   (nunca se avisa dos veces). Si falló o no aplicó, el aviso al grupo sale como siempre.
-3. Los repartidores propios no ven ni aceptan pedidos que tiene la plataforma
-   (`GET /delivery/orders/available` y `accept` los excluyen). Si la plataforma abandona
-   la entrega (`cancelled`/`failed`) el pedido vuelve a estar disponible para ellos.
+2. **Transición (`SMARKY_NOTIFY_OWN_DRIVERS=true`, el default):** el pedido va a la plataforma
+   **y** sigue llegando como siempre al grupo de Telegram y a la app de repartidores propios,
+   como si la plataforma no existiera. El aviso al grupo agrega la línea "También está en la
+   plataforma de reparto." (sin link ni código). No hay coordinación automática entre ambos
+   canales: quién lleva cada pedido lo indican personas a las motos.
+3. **Solo plataforma (`SMARKY_NOTIFY_OWN_DRIVERS=false`):** si la plataforma toma el pedido no
+   se avisa al grupo propio, y los repartidores propios no ven ni aceptan ese pedido
+   (`GET /delivery/orders/available` y `accept` lo excluyen). Si la plataforma lo abandona
+   (`cancelled`/`failed`) vuelve a estar disponible para ellos. Si la plataforma falla o no
+   aplica, el aviso al grupo sale como siempre en ambos modos.
 4. El cliente recibe **un WhatsApp** (texto directo por el gateway) que abre con
    "¡Listo! Tenemos tu pedido ORD-N confirmado…", el link de seguimiento y el código de
    entrega. El código **no se guarda ni se escribe en logs**. Si el envío falla se reintenta
@@ -48,6 +53,7 @@ DELIVERY_PROVIDER=internal
 SMARKY_BASE_URL=
 SMARKY_API_KEY=
 SMARKY_WEBHOOK_SECRET=
+SMARKY_NOTIFY_OWN_DRIVERS=true
 ```
 
 Las entrega el panel de la plataforma; **nunca** se commitean ni se imprimen. Con
@@ -107,7 +113,7 @@ Dokploy usa proveedor Git **sin autodeploy**: nada se despliega al hacer push.
    flujo vuelve a ser exactamente el de siempre. Los pedidos que la plataforma ya tenía
    siguen mostrándose con su link y el webhook deja de aceptarse (404); si hay alguno en
    curso, atiéndelo a mano o con repartidores propios (quedan ocultos para ellos mientras su
-   `smarky_delivery_status` no sea `cancelled`/`failed`: en ese caso límpialo con
+   `smarky_delivery_status` no sea `cancelled`/`failed` y la variable esté en `false`; límpialo con
    `update orders set smarky_delivery_status = null where id = '<pedido>'`).
 2. **Volver al código anterior**: en Dokploy, redesplegar el deployment/commit anterior
    (`c7bcc95` de `master`). La migración **no se revierte**: es aditiva y el código viejo la
@@ -119,3 +125,20 @@ Dokploy usa proveedor Git **sin autodeploy**: nada se despliega al hacer push.
 `npm test` (los 12 fallos de `order-replacement.service.spec` dependen de la hora y de la
 caja abierta y ya fallaban en `master`). Con `internal` los tests demuestran que no se
 invoca la plataforma, el aviso al grupo sale igual y el filtro de repartidores no excluye nada.
+
+## Transición a solo plataforma: cómo apagar el reparto propio
+
+`SMARKY_NOTIFY_OWN_DRIVERS` (default `true`) solo importa con `DELIVERY_PROVIDER=smarky`. Mientras
+sea `true`, nadie pierde un pedido: llega a la plataforma, al grupo de Telegram y a la app de
+repartidores propios. **Ojo con el doble reparto:** si una moto propia y una de la plataforma
+toman el mismo pedido, hay que resolverlo a mano (el sistema no cancela ninguna de las dos).
+
+Cuando las motos ya usen la plataforma:
+
+1. En Dokploy poner `SMARKY_NOTIFY_OWN_DRIVERS=false` y **redesplegar** (se lee al arrancar).
+2. Desde ese momento, un pedido que la plataforma toma ya no avisa al grupo ni aparece en la
+   app de repartidores propios. Si la plataforma falla, el pedido sigue llegando al grupo y a
+   la app como siempre.
+3. Para volver a la transición: `SMARKY_NOTIFY_OWN_DRIVERS=true` y redesplegar.
+
+Con `DELIVERY_PROVIDER=internal` esta variable no hace nada.

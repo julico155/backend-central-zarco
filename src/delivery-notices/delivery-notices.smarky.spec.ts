@@ -59,8 +59,8 @@ describe('DeliveryNoticesService con la plataforma de reparto', () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['dispatched', 'in_progress'])('si la plataforma toma el pedido (%s) NO se avisa al grupo propio', async (resultado) => {
-    const smarky = { enabled: true, dispatchForOrder: jest.fn().mockResolvedValue(resultado) };
+  it.each(['dispatched', 'in_progress'])('solo plataforma (SMARKY_NOTIFY_OWN_DRIVERS=false): si la plataforma toma el pedido (%s) NO se avisa al grupo propio', async (resultado) => {
+    const smarky = { enabled: true, notifyOwnDrivers: false, dispatchForOrder: jest.fn().mockResolvedValue(resultado) };
     const { service, notify } = crear(smarky);
     await service.notifyConfirmed('order-1');
     expect(smarky.dispatchForOrder).toHaveBeenCalledWith('order-1');
@@ -68,7 +68,7 @@ describe('DeliveryNoticesService con la plataforma de reparto', () => {
   });
 
   it.each(['failed', 'skipped'])('si la plataforma falla o no aplica (%s) cae al aviso de siempre', async (resultado) => {
-    const smarky = { enabled: true, dispatchForOrder: jest.fn().mockResolvedValue(resultado) };
+    const smarky = { enabled: true, notifyOwnDrivers: false, dispatchForOrder: jest.fn().mockResolvedValue(resultado) };
     const { service, notify } = crear(smarky);
     await service.notifyConfirmed('order-1');
     expect(notify).toHaveBeenCalledTimes(1);
@@ -86,5 +86,34 @@ describe('DeliveryNoticesService con la plataforma de reparto', () => {
     });
     await service.notifyConfirmed('order-1');
     expect(smarky.dispatchForOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('DeliveryNoticesService — transición (SMARKY_NOTIFY_OWN_DRIVERS=true)', () => {
+  it.each(['dispatched', 'in_progress'])(
+    'aunque la plataforma tome el pedido (%s) el aviso al grupo sale igual, con la línea de la plataforma',
+    async (resultado) => {
+      const smarky = { enabled: true, notifyOwnDrivers: true, dispatchForOrder: jest.fn().mockResolvedValue(resultado) };
+      const { service, notify } = crear(smarky);
+      await service.notifyConfirmed('order-1');
+      expect(notify).toHaveBeenCalledTimes(1);
+      const texto = notify.mock.calls[0][0].payload.text as string;
+      expect(notify.mock.calls[0][0]).toMatchObject({ channel: 'telegram', kind: 'delivery_notice' });
+      expect(texto).toContain('También está en la plataforma de reparto.');
+      expect(texto).not.toMatch(/https?:\/\/seguimiento|código de entrega/i);
+    },
+  );
+
+  it.each(['failed', 'skipped'])('si la plataforma falla o no aplica (%s) el aviso sale SIN la línea de la plataforma', async (resultado) => {
+    const smarky = { enabled: true, notifyOwnDrivers: true, dispatchForOrder: jest.fn().mockResolvedValue(resultado) };
+    const { service, notify } = crear(smarky);
+    await service.notifyConfirmed('order-1');
+    expect(notify.mock.calls[0][0].payload.text).not.toContain('plataforma de reparto');
+  });
+
+  it('con el proveedor interno el texto del aviso no cambia en nada', async () => {
+    const { service, notify } = crear(undefined);
+    await service.notifyConfirmed('order-1');
+    expect(notify.mock.calls[0][0].payload.text).not.toContain('plataforma de reparto');
   });
 });
