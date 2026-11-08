@@ -5,13 +5,16 @@ import { GatewayClientModule } from '../../gateway-client/gateway-client.module'
 import { NotificationsOutModule } from '../../notifications-out/notifications-out.module';
 import { SmarkyClient } from './smarky-client';
 import { SMARKY_CLIENT, SmarkyDeliveryService } from './smarky-delivery.service';
+import { CommonModule } from '../../common/common.module';
+import { SmarkyTrackingController } from './smarky-tracking.controller';
+import { SmarkyTrackingService } from './smarky-tracking.service';
 import { SmarkyWebhookController } from './smarky-webhook.controller';
 import { SmarkyWebhookService } from './smarky-webhook.service';
 
 /** Proveedor de reparto `smarky` (DELIVERY_PROVIDER=smarky). Con `internal` queda inerte. */
 @Module({
-  imports: [GatewayClientModule, NotificationsOutModule],
-  controllers: [SmarkyWebhookController],
+  imports: [CommonModule, GatewayClientModule, NotificationsOutModule],
+  controllers: [SmarkyWebhookController, SmarkyTrackingController],
   providers: [
     {
       provide: SMARKY_CLIENT,
@@ -24,6 +27,7 @@ import { SmarkyWebhookService } from './smarky-webhook.service';
     },
     SmarkyDeliveryService,
     SmarkyWebhookService,
+    SmarkyTrackingService,
   ],
   exports: [SmarkyDeliveryService],
 })
