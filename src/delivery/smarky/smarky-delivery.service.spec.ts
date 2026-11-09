@@ -318,6 +318,13 @@ describe('mensaje de seguimiento', () => {
   it('sin código solo lleva el link', () => {
     const texto = buildTrackingMessage({ orderNumber: 'ORD-276', trackingUrl: 'https://s.test/seguir/x', deliveryCode: null });
     expect(texto).not.toContain('Código');
+    expect(texto).toBe(
+      [
+        '¡Listo! Tenemos tu pedido ORD-276 confirmado y ya pasa a cocina 🙌',
+        '',
+        '*Sigue tu pedido, mira por dónde va tu Delivery AQUÍ*: https://s.test/seguir/x',
+      ].join('\n'),
+    );
   });
 
   it('normaliza el teléfono a E.164 y descarta los inválidos', () => {

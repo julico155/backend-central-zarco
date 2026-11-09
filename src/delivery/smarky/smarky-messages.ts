@@ -10,7 +10,7 @@ export function buildTrackingMessage(input: {
   const lines = [
     `¡Listo! Tenemos tu pedido ${input.orderNumber} confirmado y ya pasa a cocina 🙌`,
     '',
-    `Sigue tu pedido en vivo aquí: ${input.trackingUrl}`,
+    `*Sigue tu pedido, mira por dónde va tu Delivery AQUÍ*: ${input.trackingUrl}`,
   ];
   if (input.deliveryCode) {
     lines.push(
