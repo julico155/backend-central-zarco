@@ -28,3 +28,21 @@ describe('configuración de reparto', () => {
     expect(cargar({ DELIVERY_PROVIDER: 'otra' }).provider).toBe('internal');
   });
 });
+
+describe('configuración del código de entrega', () => {
+  const original = { ...process.env };
+  afterEach(() => {
+    process.env = { ...original };
+  });
+  const cargar = (v: string | undefined) => {
+    process.env = { ...original, DATABASE_URL: 'postgres://x', JWT_SECRET: 's', SMARKY_REQUIRE_DELIVERY_CODE: v };
+    return configuration().delivery.smarky.requireDeliveryCode;
+  };
+
+  it('por defecto no se pide código de entrega; solo "true" lo reactiva', () => {
+    expect(cargar(undefined)).toBe(false);
+    expect(cargar('')).toBe(false);
+    expect(cargar('false')).toBe(false);
+    expect(cargar(' TRUE ')).toBe(true);
+  });
+});

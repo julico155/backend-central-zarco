@@ -63,6 +63,11 @@ export class SmarkyDeliveryService implements OnModuleInit {
     return this.config.get('delivery', { infer: true }).smarky.notifyOwnDrivers;
   }
 
+  /** Si es false (default) se pide la entrega sin código de entrega. No tiene que ver con el pin de ubicación. */
+  get requireDeliveryCode(): boolean {
+    return this.config.get('delivery', { infer: true }).smarky.requireDeliveryCode === true;
+  }
+
   /** Nunca lanza: cualquier fallo inesperado es `failed` y el pedido sigue por el flujo propio. */
   async dispatchForOrder(orderId: string): Promise<SmarkyDispatchResult> {
     try {
@@ -128,6 +133,8 @@ export class SmarkyDeliveryService implements OnModuleInit {
         customer: { name: order.customer_name, phone },
         prepEtaMinutes: PREP_ETA_MINUTES,
         orderLabel: shortOrderNumber(order.order_number).slice(0, 32),
+        // Explícito siempre: omitirlo haría que la plataforma emita código (default true).
+        requireDeliveryCode: this.requireDeliveryCode,
       });
       const quote = await client.createQuote(destination);
       try {
@@ -176,10 +183,12 @@ export class SmarkyDeliveryService implements OnModuleInit {
     client: SmarkyClient,
     input: { orderId: string; customerId: string; orderNumber: string; delivery: SmarkyDeliveryCreated },
   ): Promise<void> {
-    let code: string | null = input.delivery.deliveryCode ?? null;
+    const needsCode = this.requireDeliveryCode;
+    let code: string | null = needsCode ? (input.delivery.deliveryCode ?? null) : null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        if (!code) code = await client.reissueCode(input.delivery.deliveryId);
+        // Sin código requerido no se reemite (la plataforma respondería 409 code_not_required).
+        if (needsCode && !code) code = await client.reissueCode(input.delivery.deliveryId);
         await this.gateway.sendWhatsappMessage({
           customerId: input.customerId,
           text: buildTrackingMessage({

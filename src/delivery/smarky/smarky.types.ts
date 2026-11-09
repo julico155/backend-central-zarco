@@ -47,6 +47,8 @@ export interface SmarkyCreateDeliveryInput {
   prepEtaMinutes: number;
   orderLabel?: string;
   dropoffReference?: string;
+  /** Default true en la plataforma. Para no emitir código de entrega hay que mandar `false` explícito. */
+  requireDeliveryCode?: boolean;
 }
 
 export interface SmarkyWebhookEvent {

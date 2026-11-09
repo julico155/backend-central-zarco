@@ -31,6 +31,8 @@ function crear(opciones: {
   client?: Partial<Record<'createQuote' | 'createDelivery' | 'reissueCode', jest.Mock>> | null;
   enviar?: jest.Mock;
   proveedor?: 'smarky' | 'internal';
+  /** Por defecto false (como en producción): sin código de entrega. */
+  requerirCodigo?: boolean;
 }) {
   const actualizaciones: Array<Record<string, unknown>> = [];
   const db = {
@@ -62,7 +64,7 @@ function crear(opciones: {
   const config = {
     get: () => ({
       provider: opciones.proveedor ?? 'smarky',
-      smarky: { baseUrl: 'https://x', apiKey: 'k', webhookSecret: 's' },
+      smarky: { baseUrl: 'https://x', apiKey: 'k', webhookSecret: 's', requireDeliveryCode: opciones.requerirCodigo === true },
     }),
   } as unknown as ConfigService<never, true>;
 
@@ -107,7 +109,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
   });
 
   it('cotiza con el pin, pide la entrega con el id del pedido y manda link + código en un solo WhatsApp de texto', async () => {
-    const { service, client, enviar, actualizaciones } = crear({});
+    const { service, client, enviar, actualizaciones } = crear({ requerirCodigo: true });
     await expect(service.dispatchForOrder(ID_PEDIDO)).resolves.toBe('dispatched');
 
     expect(client.createQuote).toHaveBeenCalledWith({ latitude: -17.78, longitude: -63.18 });
@@ -117,6 +119,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
       customer: { name: 'Ana', phone: '+59171234567' },
       prepEtaMinutes: 20,
       orderLabel: 'ORD-276',
+      requireDeliveryCode: true,
     });
     expect(enviar).toHaveBeenCalledTimes(1);
     const mensaje = enviar.mock.calls[0][0] as { customerId: string; text: string; messageType?: string };
@@ -156,7 +159,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
       .fn()
       .mockRejectedValueOnce(new Error('gateway caído'))
       .mockResolvedValueOnce({ externalMessageId: 'm2' });
-    const { service, client } = crear({ enviar });
+    const { service, client } = crear({ enviar, requerirCodigo: true });
     await expect(service.dispatchForOrder(ID_PEDIDO)).resolves.toBe('dispatched');
 
     expect(client.reissueCode).toHaveBeenCalledWith('d1');
@@ -165,7 +168,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
   });
 
   it('si el envío directo falla dos veces, el link sale por la cola SIN código y la entrega sigue como pedida', async () => {
-    const { service, notifyNow } = crear({ enviar: jest.fn().mockRejectedValue(new Error('caído')) });
+    const { service, notifyNow } = crear({ requerirCodigo: true, enviar: jest.fn().mockRejectedValue(new Error('caído')) });
     await expect(service.dispatchForOrder(ID_PEDIDO)).resolves.toBe('dispatched');
     expect(notifyNow).toHaveBeenCalledTimes(1);
     const job = notifyNow.mock.calls[0][0] as { kind: string; targetRef: string; payload: { text: string } };
@@ -176,7 +179,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
   });
 
   it('si la entrega ya existía y no trae código, lo reemite para mandárselo al cliente', async () => {
-    const { service, client, enviar } = crear({
+    const { service, client, enviar } = crear({ requerirCodigo: true,
       client: {
         createDelivery: jest.fn().mockResolvedValue({
           deliveryId: 'd1',
@@ -190,6 +193,47 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
     await service.dispatchForOrder(ID_PEDIDO);
     expect(client.reissueCode).toHaveBeenCalledTimes(1);
     expect((enviar.mock.calls[0][0] as { text: string }).text).toContain('9999');
+  });
+
+  it('por defecto pide la entrega SIN código (requireDeliveryCode:false explícito) y el WhatsApp solo lleva el link', async () => {
+    const { service, client, enviar } = crear({
+      client: {
+        createDelivery: jest.fn().mockResolvedValue({
+          deliveryId: 'd1',
+          externalOrderId: ID_PEDIDO,
+          status: 'searching',
+          fee: '7.00',
+          trackingUrl: 'https://seguimiento.test/seguir/abc',
+        }),
+      },
+    });
+    expect(service.requireDeliveryCode).toBe(false);
+    await expect(service.dispatchForOrder(ID_PEDIDO)).resolves.toBe('dispatched');
+
+    expect(client.createQuote).toHaveBeenCalledWith({ latitude: -17.78, longitude: -63.18 });
+    expect((client.createDelivery.mock.calls[0][0] as { requireDeliveryCode: boolean }).requireDeliveryCode).toBe(false);
+    expect(client.reissueCode).not.toHaveBeenCalled();
+    const texto = (enviar.mock.calls[0][0] as { text: string }).text;
+    expect(texto).toContain('https://seguimiento.test/seguir/abc');
+    expect(texto).not.toMatch(/Código de entrega/);
+  });
+
+  it('sin código, si el WhatsApp falla se reintenta sin reemitir nada', async () => {
+    const enviar = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('gateway caído'))
+      .mockResolvedValueOnce({ externalMessageId: 'm2' });
+    const { service, client } = crear({ enviar });
+    await expect(service.dispatchForOrder(ID_PEDIDO)).resolves.toBe('dispatched');
+    expect(enviar).toHaveBeenCalledTimes(2);
+    expect(client.reissueCode).not.toHaveBeenCalled();
+  });
+
+  it('con SMARKY_REQUIRE_DELIVERY_CODE=true vuelve a pedir código', async () => {
+    const { service, client } = crear({ requerirCodigo: true });
+    expect(service.requireDeliveryCode).toBe(true);
+    await service.dispatchForOrder(ID_PEDIDO);
+    expect((client.createDelivery.mock.calls[0][0] as { requireDeliveryCode: boolean }).requireDeliveryCode).toBe(true);
   });
 
   it('recotiza una vez si la cotización venció', async () => {
@@ -212,7 +256,7 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
   });
 
   it('out_of_coverage: devuelve failed (cae al flujo propio), libera el reclamo y no manda WhatsApp', async () => {
-    const { service, enviar, actualizaciones } = crear({
+    const { service, enviar, actualizaciones } = crear({ requerirCodigo: true,
       client: { createQuote: jest.fn().mockRejectedValue(new SmarkyApiError(422, 'out_of_coverage', 'fuera')) },
     });
     await expect(service.dispatchForOrder(ID_PEDIDO)).resolves.toBe('failed');

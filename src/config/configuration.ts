@@ -76,6 +76,11 @@ export interface AppConfig {
        * repartidores propios mientras la plataforma no tenga moto asignada. `false` = solo plataforma.
        */
       notifyOwnDrivers: boolean;
+      /**
+       * Código de entrega de 4 dígitos (NO el pin de ubicación). Default `false`: no se pide código a
+       * ningún pedido (se manda `requireDeliveryCode:false`). `true` = comportamiento anterior.
+       */
+      requireDeliveryCode: boolean;
     };
   };
 }
@@ -167,6 +172,7 @@ export default (): AppConfig => ({
       apiKey: process.env.SMARKY_API_KEY ?? '',
       webhookSecret: process.env.SMARKY_WEBHOOK_SECRET ?? '',
       notifyOwnDrivers: process.env.SMARKY_NOTIFY_OWN_DRIVERS?.trim().toLowerCase() !== 'false',
+      requireDeliveryCode: process.env.SMARKY_REQUIRE_DELIVERY_CODE?.trim().toLowerCase() === 'true',
     },
   },
 });

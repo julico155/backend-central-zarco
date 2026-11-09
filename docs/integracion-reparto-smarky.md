@@ -27,7 +27,13 @@ Contrato de la plataforma: `smarky-delivery-platform/docs/openapi.yaml`.
    (`GET /delivery/orders/available` y `accept` lo excluyen). Si la plataforma lo abandona
    (`cancelled`/`failed`) vuelve a estar disponible para ellos. Si la plataforma falla o no
    aplica, el aviso al grupo sale como siempre en ambos modos.
-4. El cliente recibe **un WhatsApp** (texto directo por el gateway) que abre con
+4. **Sin código de entrega (default):** `SMARKY_REQUIRE_DELIVERY_CODE=false` hace que Zarco mande
+   `requireDeliveryCode:false` en `POST /v1/entregas` (la cotización sigue siendo obligatoria y el destino
+   sigue siendo lat/long; el "código" es el de 4 dígitos, no el pin de ubicación). El WhatsApp lleva solo
+   el link. Con `true` vuelve el comportamiento anterior (código en el WhatsApp). **Requiere que la
+   plataforma desplegada tenga ya el campo** (PR #21, migración `pin-opcional`); si no, rechaza el
+   body y el pedido cae al reparto propio. Confirmarlo antes de activar `smarky`.
+   Lo que sigue describe el caso con código (`true`): el cliente recibe **un WhatsApp** (texto directo por el gateway) que abre con
    "¡Listo! Tenemos tu pedido ORD-N confirmado…", el link de seguimiento y el código de
    entrega. El código **no se guarda ni se escribe en logs**. Si el envío falla se reintenta
    con un código nuevo; si vuelve a fallar sale por `notification_jobs` solo con el link.
@@ -54,6 +60,7 @@ SMARKY_BASE_URL=
 SMARKY_API_KEY=
 SMARKY_WEBHOOK_SECRET=
 SMARKY_NOTIFY_OWN_DRIVERS=true
+SMARKY_REQUIRE_DELIVERY_CODE=false
 ```
 
 Las entrega el panel de la plataforma; **nunca** se commitean ni se imprimen. Con
