@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { CommonModule } from '../common/common.module';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsOutModule } from '../notifications-out/notifications-out.module';
+import { OrderQueueModule } from '../order-queue/order-queue.module';
 import { OperationalSettingsModule } from '../operational-settings/operational-settings.module';
 import { DeliveryModule } from '../delivery/delivery.module';
 import { CashRegisterModule } from '../cash-register/cash-register.module';
@@ -18,6 +19,7 @@ import { KitchenAutoCompleteCron } from './kitchen-auto-complete.cron';
     AuthModule,
     NotificationsOutModule,
     OperationalSettingsModule,
+    OrderQueueModule,
     forwardRef(() => DeliveryModule),
     CashRegisterModule,
     BankQrModule,

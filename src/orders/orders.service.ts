@@ -24,8 +24,9 @@ import {
 } from '../common/exceptions/domain-exception';
 import { catalogChannelOfOrder, SELL_ON_COLUMN } from '../common/channel-visibility';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
-import { checkoutGateAt, lateRequestExpiryFor } from '../common/time/service-window';
+import { CheckoutGate, checkoutGateAt, lateRequestExpiryFor } from '../common/time/service-window';
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
+import { OrderQueueService } from '../order-queue/order-queue.service';
 import { DeliveryService, OrderQuoteResponse } from '../delivery/delivery.service';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { CashRegisterService } from '../cash-register/cash-register.service';
@@ -158,6 +159,8 @@ export class OrdersService {
     private readonly qrPayments: QrPaymentsService,
     private readonly config: ConfigService<AppConfig, true>,
     private readonly deliveryNotices: DeliveryNoticesService,
+    /** Opcional: los tests unitarios anteriores a la cola arman el servicio sin él. En la app siempre se inyecta. */
+    private readonly orderQueue?: OrderQueueService,
   ) {}
 
   async findById(id: string): Promise<OrderResponse> {
@@ -245,13 +248,44 @@ export class OrdersService {
     const bypassAllowed =
       (dto.bypassHoursGate === true && dto.channel === 'pos') ||
       (dto.channel === 'web' && (await this.isAiTestCustomer(dto.customerId)));
-    const gate = bypassAllowed
-      ? ({ gate: 'proceed' } as const)
+
+    // Reglas operativas que el admin mueve desde el POS (ver operational_settings). Solo aplican a los canales de
+    // cliente (WhatsApp/web): el mostrador sigue vendiendo siempre, y los teléfonos de prueba del agente no se frenan.
+    const customerRules = (dto.channel === 'whatsapp' || dto.channel === 'web') && !bypassAllowed;
+    if (customerRules) {
+      if (settings.manually_closed) throw new StoreClosedError(settings.closed_message);
+      if (settings.cash_enabled === false && dto.paymentMethod === 'cash') {
+        throw new DomainException(
+          'cash_disabled',
+          HttpStatus.CONFLICT,
+          'Por ahora no estamos recibiendo pagos en efectivo. Paga con QR, por favor.',
+        );
+      }
+      if (
+        settings.allow_promo_with_items === false &&
+        dto.items.length > 0 &&
+        (dto.promotions?.length ?? 0) > 0
+      ) {
+        throw new DomainException(
+          'promo_mix_not_allowed',
+          HttpStatus.CONFLICT,
+          'Las promociones no se pueden combinar con otros productos en el mismo pedido.',
+        );
+      }
+    }
+
+    let gate: CheckoutGate = bypassAllowed
+      ? { gate: 'proceed' }
       : checkoutGateAt(
           now,
           { opensHour: settings.business_opens_hour, closesHour: settings.business_closes_hour },
           await this.cashRegister.isOpen(),
         );
+    // "Seguimos atendiendo": pasado el margen horario el local sigue tomando pedidos mientras el admin lo tenga
+    // activo (la caja sigue decidiendo entre tomarlo directo o encolarlo para revisión).
+    if (gate.gate === 'closed' && customerRules && settings.extended_service_enabled) {
+      gate = (await this.cashRegister.isOpen()) ? { gate: 'proceed' } : { gate: 'late_review' };
+    }
 
     if (gate.gate === 'closed') {
       throw new StoreClosedError();
@@ -261,6 +295,9 @@ export class OrdersService {
       const body = await this.createLateOrderRequest(dto, idempotencyKey, now);
       return { httpStatus: 202, body };
     }
+
+    // Cola de pedidos: con la cocina llena, el cliente espera su turno (o entra si ya se le avisó).
+    if (customerRules) await this.orderQueue?.assertCanOrder(dto.customerId, dto.channel);
 
     const outcome = await this.idempotency.run({
       apiClient,
@@ -277,6 +314,11 @@ export class OrdersService {
     // externa quedaría sosteniendo la transacción abierta. Solo en una
     // creación real (no en una respuesta cacheada de un reintento).
     if (outcome.created) {
+      if (customerRules) {
+        this.orderQueue?.markUsed(dto.customerId).catch((error: Error) =>
+          this.logger.warn(`markUsed de la cola falló para ${outcome.body.id}: ${error.message}`),
+        );
+      }
       this.notifyOrderCreated(outcome.body).catch((error: Error) =>
         this.logger.warn(`notifyOrderCreated falló para ${outcome.body.id}: ${error.message}`),
       );

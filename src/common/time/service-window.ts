@@ -33,7 +33,7 @@ export interface ServiceHours {
   closesHour: number;
 }
 
-function hourInBolivia(instant: Date): number | null {
+export function hourInBolivia(instant: Date): number | null {
   const ms = instant.getTime();
   if (!Number.isFinite(ms)) return null;
   try {

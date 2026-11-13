@@ -16,6 +16,16 @@ export class OperationalSettingsController {
     return this.settings.get();
   }
 
+  /**
+   * Estado listo para consumir (¿atendemos?, por qué, textos para el cliente, reglas de efectivo/promos/cola).
+   * Lo leen el agente de WhatsApp y el menú web con su token de servicio: así deciden con la MISMA lógica que el backend.
+   */
+  @Get('service-status')
+  @UseGuards(ServiceOrStaffAuthGuard)
+  serviceStatus() {
+    return this.settings.getServiceStatus();
+  }
+
   @Patch()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')

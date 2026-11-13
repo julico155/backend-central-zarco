@@ -386,7 +386,36 @@ export interface OperationalSettingsTable {
   business_closes_hour: Generated<number>;
   restaurant_latitude: number | null;
   restaurant_longitude: number | null;
+  /** Modos temporales (se reinician solos a daily_reset_hour, ver OperationalModesResetCron). */
+  cash_enabled: Generated<boolean>;
+  extended_service_enabled: Generated<boolean>;
+  manually_closed: Generated<boolean>;
+  queue_enabled: Generated<boolean>;
+  queue_capacity: Generated<number>;
+  queue_release_batch: Generated<number>;
+  /** Regla fija: ¿se puede mezclar una promoción con productos sueltos en el mismo pedido? */
+  allow_promo_with_items: Generated<boolean>;
+  daily_reset_hour: Generated<number>;
+  last_daily_reset_on: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Horario exacto que ve el cliente (business_opens_hour/closes_hour son solo el margen ancho). */
+  schedule_opens_hour: Generated<number>;
+  schedule_closes_hour: Generated<number>;
+  closed_message: Generated<string>;
+  extended_message: Generated<string>;
   updated_at: Timestamp;
+}
+
+export type OrderQueueEntryStatus = 'waiting' | 'admitted' | 'used' | 'expired';
+
+export interface OrderQueueEntriesTable {
+  id: Generated<string>;
+  customer_id: string;
+  status: Generated<OrderQueueEntryStatus>;
+  created_at: Generated<Date>;
+  notified_at: Timestamp | null;
+  admitted_until: Timestamp | null;
+  last_reminder_at: Timestamp | null;
+  used_at: Timestamp | null;
 }
 
 export type DashboardUserRole = 'admin' | 'kitchen' | 'cashier' | 'delivery';
@@ -449,4 +478,5 @@ export interface Database {
   dashboard_users: DashboardUsersTable;
   notification_jobs: NotificationJobsTable;
   smarky_webhook_events: SmarkyWebhookEventsTable;
+  order_queue_entries: OrderQueueEntriesTable;
 }

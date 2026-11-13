@@ -59,8 +59,8 @@ export class IdempotencyKeyReusedError extends DomainException {
 }
 
 export class StoreClosedError extends DomainException {
-  constructor() {
-    super('closed', HttpStatus.CONFLICT, 'El local está cerrado en este momento.');
+  constructor(message = 'El local está cerrado en este momento.') {
+    super('closed', HttpStatus.CONFLICT, message);
   }
 }
 
