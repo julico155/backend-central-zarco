@@ -18,6 +18,9 @@ const pedidoListo = {
   status: 'confirmed',
   payment_status: 'paid',
   payment_method: 'qr',
+  subtotal_amount: '85.50',
+  split_cash_amount: null,
+  notes: 'Sin picante',
   delivery_latitude: -17.78,
   delivery_longitude: -63.18,
   smarky_delivery_id: null,
@@ -41,6 +44,9 @@ function crear(opciones: {
       b.select = () => b;
       b.selectAll = () => b;
       b.where = () => b;
+      b.orderBy = () => b;
+      b.execute = async () =>
+        tabla === 'order_items' ? [{ product_name_snapshot: 'Hamburguesa', quantity: 2, excluded_complements: ['tomate'] }] : [];
       b.executeTakeFirst = async () =>
         tabla === 'orders'
           ? { ...pedidoListo, ...opciones.pedido }
@@ -120,6 +126,9 @@ describe('SmarkyDeliveryService.dispatchForOrder', () => {
       prepEtaMinutes: 20,
       orderLabel: 'ORD-276',
       requireDeliveryCode: true,
+      paymentMethod: 'qr',
+      items: [{ name: 'Hamburguesa', quantity: 2, notes: 'Sin tomate' }],
+      orderNotes: 'Sin picante',
     });
     expect(enviar).toHaveBeenCalledTimes(1);
     const mensaje = enviar.mock.calls[0][0] as { customerId: string; text: string; messageType?: string };

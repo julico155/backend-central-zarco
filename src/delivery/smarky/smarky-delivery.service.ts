@@ -8,6 +8,7 @@ import { shortOrderNumber } from '../../delivery-notices/delivery-notice';
 import { GatewayClientService } from '../../gateway-client/gateway-client.service';
 import { NotificationsOutService } from '../../notifications-out/notifications-out.service';
 import { SmarkyApiError, SmarkyClient } from './smarky-client';
+import { buildSmarkyOrderDetails } from './smarky-order-details';
 import { buildTrackingMessage, toE164 } from './smarky-messages';
 import { isAbandonedDeliveryStatus } from './smarky-status';
 import { SmarkyDeliveryCreated } from './smarky.types';
@@ -124,6 +125,14 @@ export class SmarkyDeliveryService implements OnModuleInit {
       return 'failed';
     }
 
+    const orderItems = await this.db
+      .selectFrom('order_items')
+      .select(['product_name_snapshot', 'quantity', 'excluded_complements'])
+      .where('order_id', '=', orderId)
+      .orderBy('created_at')
+      .execute();
+    const details = buildSmarkyOrderDetails(order, orderItems);
+
     let created: SmarkyDeliveryCreated;
     try {
       const destination = { latitude: order.delivery_latitude, longitude: order.delivery_longitude };
@@ -132,6 +141,7 @@ export class SmarkyDeliveryService implements OnModuleInit {
         quoteId,
         customer: { name: order.customer_name, phone },
         prepEtaMinutes: PREP_ETA_MINUTES,
+        ...details,
         orderLabel: shortOrderNumber(order.order_number).slice(0, 32),
         // Explícito siempre: omitirlo haría que la plataforma emita código (default true).
         requireDeliveryCode: this.requireDeliveryCode,

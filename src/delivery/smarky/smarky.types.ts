@@ -47,6 +47,14 @@ export interface SmarkyCreateDeliveryInput {
   prepEtaMinutes: number;
   orderLabel?: string;
   dropoffReference?: string;
+  /** Solo informativo para el repartidor. */
+  paymentMethod?: 'cash' | 'qr';
+  /** Efectivo por la COMIDA (sin envío), 2 decimales. Solo con `paymentMethod: 'cash'`. */
+  cashToCollect?: string;
+  /** Sin precios; máx 50. */
+  items?: Array<{ name: string; quantity: number; notes?: string }>;
+  /** Máx 500. */
+  orderNotes?: string;
   /** Default true en la plataforma. Para no emitir código de entrega hay que mandar `false` explícito. */
   requireDeliveryCode?: boolean;
 }
