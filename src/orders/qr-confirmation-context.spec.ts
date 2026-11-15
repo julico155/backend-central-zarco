@@ -38,6 +38,7 @@ function baseOrder(overrides: Partial<OrderResponse> = {}): OrderResponse {
         quantity: 1,
         subtotal: 18,
         excludedComplements: [],
+        extras: [],
       },
       {
         productId: 'p2',
@@ -47,6 +48,7 @@ function baseOrder(overrides: Partial<OrderResponse> = {}): OrderResponse {
         quantity: 1,
         subtotal: 4,
         excludedComplements: [],
+        extras: [],
       },
     ],
     promotions: [],
@@ -74,6 +76,39 @@ describe('buildQrConfirmationContext', () => {
       totalAmount: 32,
       qrAmount: 22,
     });
+  });
+
+  it('una línea con extras dobla los extras en el nombre y en el precio unitario, para que cantidad × precio = subtotal', () => {
+    const context = buildQrConfirmationContext(
+      baseOrder({
+        deliveryType: 'pickup',
+        deliveryBaseAmount: 0,
+        deliverySurchargeAmount: 0,
+        subtotalAmount: 84,
+        totalAmount: 84,
+        items: [
+          {
+            productId: 'p1',
+            productCodeSnapshot: 'TRP',
+            productNameSnapshot: 'Trancapecho',
+            unitPriceSnapshot: 18,
+            quantity: 3,
+            // 3 × (18 + 2 carnes de 5 + 1 queso de 0) = 84
+            subtotal: 84,
+            excludedComplements: [],
+            extras: [
+              { extraId: 'e1', name: 'Carne', unitPrice: 5, quantity: 2 },
+              { extraId: 'e2', name: 'Queso', unitPrice: 0, quantity: 1 },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(context.items).toEqual([
+      { name: 'Trancapecho (+2 Carne, +1 Queso)', quantity: 3, unitPrice: 28, subtotal: 84, excludedComplements: [] },
+    ]);
+    expect(context.qrAmount).toBe(84);
   });
 
   it('pickup/mesa: deliveryAmount queda en 0, qrAmount sigue siendo el subtotal', () => {

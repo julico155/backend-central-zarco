@@ -146,7 +146,34 @@ export interface OrderItemsTable {
   subtotal: string;
   /** Snapshot de nombres de complementos excluidos en esta línea (ej. ["quirquiña"]) — nunca un id, ver migración. */
   excluded_complements: string[];
+  /** Snapshot de extras agregados en esta línea (precio incluido) — ver migración 1700000045000. */
+  extras: JSONColumnType<OrderItemExtraSnapshot[], OrderItemExtraSnapshot[] | string | undefined, string>;
   created_at: Timestamp;
+}
+
+export interface OrderItemExtraSnapshot {
+  extraId: string;
+  name: string;
+  /** Precio de UNA unidad del extra, al momento del pedido. */
+  unitPrice: number;
+  /** Cuántas veces se pidió el extra en UNA unidad del producto (2 = "doble carne"). */
+  quantity: number;
+}
+
+export interface ExtrasTable {
+  id: Generated<string>;
+  name: string;
+  price: string;
+  applies_to_all: Generated<boolean>;
+  is_active: Generated<boolean>;
+  sort_order: Generated<number>;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ExtraProductsTable {
+  extra_id: string;
+  product_id: string;
 }
 
 export interface ProductComplementsTable {
@@ -460,6 +487,8 @@ export interface Database {
   categories: CategoriesTable;
   products: ProductsTable;
   product_complements: ProductComplementsTable;
+  extras: ExtrasTable;
+  extra_products: ExtraProductsTable;
   customers: CustomersTable;
   idempotency_keys: IdempotencyKeysTable;
   orders: OrdersTable;

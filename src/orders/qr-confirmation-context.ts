@@ -1,4 +1,5 @@
 import type { CustomerMessageComboItem, CustomerMessageOrderItem } from '../gateway-client/gateway-client.service';
+import { describeExtras } from './item-extras';
 import type { OrderItemResponse, OrderPromotionResponse, OrderResponse } from './orders.service';
 
 export interface QrConfirmationContext {
@@ -36,11 +37,25 @@ export function buildQrConfirmationContext(order: OrderResponse): QrConfirmation
   };
 }
 
+/**
+ * El contrato con el agente no tiene campo de extras, así que se doblan en el nombre y en el precio unitario: así
+ * "cantidad × precio = subtotal" sigue cerrando en lo que el agente le muestra al cliente.
+ */
 function toOrderItem(item: OrderItemResponse): CustomerMessageOrderItem {
+  const extras = item.extras ?? [];
+  if (extras.length === 0) {
+    return {
+      name: item.productNameSnapshot,
+      quantity: item.quantity,
+      unitPrice: item.unitPriceSnapshot,
+      subtotal: item.subtotal,
+      excludedComplements: item.excludedComplements,
+    };
+  }
   return {
-    name: item.productNameSnapshot,
+    name: `${item.productNameSnapshot} (${describeExtras(extras)})`,
     quantity: item.quantity,
-    unitPrice: item.unitPriceSnapshot,
+    unitPrice: Math.round((item.subtotal / item.quantity) * 100) / 100,
     subtotal: item.subtotal,
     excludedComplements: item.excludedComplements,
   };

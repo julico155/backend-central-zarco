@@ -8,6 +8,7 @@ import { GatewayClientModule } from './gateway-client/gateway-client.module';
 import { NotificationsOutModule } from './notifications-out/notifications-out.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
+import { ExtrasModule } from './extras/extras.module';
 import { CustomersModule } from './customers/customers.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { OperationalSettingsModule } from './operational-settings/operational-settings.module';
@@ -34,6 +35,7 @@ import { OrderQueueModule } from './order-queue/order-queue.module';
     NotificationsOutModule,
     CategoriesModule,
     ProductsModule,
+    ExtrasModule,
     CustomersModule,
     PromotionsModule,
     OperationalSettingsModule,

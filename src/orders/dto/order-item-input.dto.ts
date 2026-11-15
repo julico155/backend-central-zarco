@@ -1,4 +1,28 @@
-import { ArrayMaxSize, IsArray, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+
+/** Un extra pedido en una línea. El precio nunca viaja: el backend lo toma del catálogo. */
+export class OrderItemExtraInputDto {
+  @IsUUID()
+  extraId!: string;
+
+  /** Veces que se agrega en UNA unidad del producto (2 = "doble carne"). */
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  quantity!: number;
+}
 
 export class OrderItemInputDto {
   @IsUUID()
@@ -21,4 +45,15 @@ export class OrderItemInputDto {
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   excludedComplements?: string[];
+
+  /**
+   * Extras con precio agregados a CADA unidad de esta línea (ej. 2× carne). Igual que los complementos, otra selección
+   * de extras del mismo producto va en otra línea.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => OrderItemExtraInputDto)
+  extras?: OrderItemExtraInputDto[];
 }

@@ -10,6 +10,7 @@ import {
   OrderDeliveryType,
   OrderPaymentMethod,
   OrderPaymentStatus,
+  OrderItemExtraSnapshot,
   OrderPromotionComponentSnapshot,
   OrderStatus,
 } from '../database/types';
@@ -38,15 +39,20 @@ import { normalizePhone } from '../customers/normalize-phone';
 import { assertRoleCanMoveStatus } from '../delivery-drivers/delivery-drivers.rules';
 import { decideLocationAttach, LocationAttachDecision } from './location-attach';
 import { buildQrConfirmationContext } from './qr-confirmation-context';
+import { ExtraCatalogEntry, ItemExtraInput, extrasKey, priceItemExtras, toCents } from './item-extras';
 
 export interface OrderItemResponse {
   productId: string;
   productCodeSnapshot: string;
   productNameSnapshot: string;
+  /** Precio del producto SOLO. Los extras van aparte (`extras`) y ya están sumados en `subtotal`. */
   unitPriceSnapshot: number;
   quantity: number;
+  /** (unitPriceSnapshot + Σ extras) × quantity. */
   subtotal: number;
   excludedComplements: string[];
+  /** Extras agregados a CADA unidad de la línea, con el precio de cuando se pidió. Vacío si no hay. */
+  extras: OrderItemExtraSnapshot[];
 }
 
 export interface OrderPromotionResponse {
@@ -122,7 +128,7 @@ export interface CheckoutCartInput {
   deliveryType: OrderDeliveryType;
   paymentMethod: OrderPaymentMethod;
   notes: string | null;
-  items: { productId: string; quantity: number; excludedComplements?: string[] }[];
+  items: { productId: string; quantity: number; excludedComplements?: string[]; extras?: ItemExtraInput[] }[];
   promotions: { promotionId: string; quantity: number; revision: number }[];
   /** Solo lo pasa LateOrderRequestsService.accept() — un pedido normal nace sin caja, se vincula recién al cobrarse. */
   registerSessionId?: string | null;
@@ -602,10 +608,12 @@ export class OrdersService {
     // de complementos (ej. "sin quirquiña" en una sola unidad) — lo que no
     // vale es repetir exactamente la misma combinación en dos líneas, eso
     // debería ser una sola línea con más quantity.
-    const itemLineKeys = items.map((i) => `${i.productId}::${complementsKey(i.excludedComplements)}`);
+    const itemLineKeys = items.map(
+      (i) => `${i.productId}::${complementsKey(i.excludedComplements)}::${extrasKey(i.extras)}`,
+    );
     if (new Set(itemLineKeys).size !== itemLineKeys.length) {
       throw new ValidationError(
-        'El carrito tiene líneas duplicadas (mismo producto y misma selección de complementos). Sumá la cantidad en una sola línea en vez de repetirla.',
+        'El carrito tiene líneas duplicadas (mismo producto, misma selección de complementos y de extras). Sumá la cantidad en una sola línea en vez de repetirla.',
       );
     }
     const promotionIds = promotions.map((p) => p.promotionId);
@@ -724,6 +732,41 @@ export class OrdersService {
       }
     }
 
+    // Catálogo de los extras pedidos (con a qué productos aplica cada uno). El precio se toma de acá, nunca del cliente.
+    const requestedExtraIds = Array.from(
+      new Set(items.flatMap((i) => (i.extras ?? []).map((e) => e.extraId))),
+    );
+    const extraCatalog = new Map<string, ExtraCatalogEntry>();
+    if (requestedExtraIds.length > 0) {
+      const extraRows = await trx
+        .selectFrom('extras')
+        .selectAll()
+        .where('id', 'in', requestedExtraIds)
+        .forShare()
+        .execute();
+      const linkRows = await trx
+        .selectFrom('extra_products')
+        .select(['extra_id', 'product_id'])
+        .where('extra_id', 'in', requestedExtraIds)
+        .execute();
+      const productsByExtra = new Map<string, Set<string>>();
+      for (const link of linkRows) {
+        const set = productsByExtra.get(link.extra_id) ?? new Set<string>();
+        set.add(link.product_id);
+        productsByExtra.set(link.extra_id, set);
+      }
+      for (const row of extraRows) {
+        extraCatalog.set(row.id, {
+          id: row.id,
+          name: row.name,
+          price: row.price,
+          applies_to_all: row.applies_to_all,
+          is_active: row.is_active,
+          productIds: productsByExtra.get(row.id) ?? new Set<string>(),
+        });
+      }
+    }
+
     const inactiveProductIds = new Set<string>();
     const soldOutProductIds = new Set<string>();
     for (const id of allProductIds) {
@@ -785,13 +828,16 @@ export class OrdersService {
     let subtotal = 0;
     const itemLines = items.map((i) => {
       const product = productById.get(i.productId)!;
-      const lineSubtotal = Number(product.price) * i.quantity;
+      const { snapshot: extras, perUnitCents } = priceItemExtras(i.productId, i.extras, extraCatalog);
+      // En centavos enteros: (producto + extras de UNA unidad) × cantidad de unidades.
+      const lineSubtotal = ((toCents(product.price) + perUnitCents) * i.quantity) / 100;
       subtotal += lineSubtotal;
       return {
         product,
         quantity: i.quantity,
         subtotal: lineSubtotal,
         excludedComplements: i.excludedComplements ?? [],
+        extras,
       };
     });
 
@@ -861,6 +907,9 @@ export class OrdersService {
             quantity: line.quantity,
             subtotal: line.subtotal.toFixed(2),
             excluded_complements: line.excludedComplements,
+            // Solo se escribe cuando la línea lleva extras. Así un pedido sin extras no toca la columna y sigue
+            // funcionando aunque este código se despliegue ANTES de aplicar la migración 1700000045000.
+            ...(line.extras.length > 0 ? { extras: JSON.stringify(line.extras) } : {}),
           })),
         )
         .execute();
@@ -1711,6 +1760,7 @@ function toOrderResponse(
     quantity: number;
     subtotal: string;
     excluded_complements: string[];
+    extras: OrderItemExtraSnapshot[];
   }[],
   promotions: {
     promotion_id: string | null;
@@ -1762,6 +1812,7 @@ function toOrderResponse(
       quantity: item.quantity,
       subtotal: Number(item.subtotal),
       excludedComplements: item.excluded_complements,
+      extras: item.extras ?? [],
     })),
     promotions: promotions.map((promotion) => ({
       promotionId: promotion.promotion_id,

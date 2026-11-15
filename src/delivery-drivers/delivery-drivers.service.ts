@@ -50,7 +50,13 @@ export interface MyDeliveryOrder {
   longitude: number | null;
   mapsUrl: string | null;
   notes: string | null;
-  items: { name: string; quantity: number; excludedComplements: string[] }[];
+  items: {
+    name: string;
+    quantity: number;
+    excludedComplements: string[];
+    /** Extras agregados a cada unidad (ej. 2× carne). */
+    extras: { name: string; quantity: number }[];
+  }[];
   promotions: { name: string; comboQuantity: number; components: OrderPromotionComponentSnapshot[] }[];
   deliveryFeeAmount: number;
   acceptedAt: string | null;
@@ -218,6 +224,7 @@ export class DeliveryDriversService {
           name: i.product_name_snapshot,
           quantity: i.quantity,
           excludedComplements: i.excluded_complements,
+          extras: (i.extras ?? []).map((e) => ({ name: e.name, quantity: e.quantity })),
         })),
       promotions: promotions
         .filter((p) => p.order_id === o.id)

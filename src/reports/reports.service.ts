@@ -294,6 +294,7 @@ export class ReportsService {
         quantity: i.quantity,
         subtotal: Number(i.subtotal),
         excludedComplements: i.excluded_complements,
+        extras: i.extras ?? [],
       })),
       promotions: promotions.map((p) => ({
         promotionId: p.promotion_id,
