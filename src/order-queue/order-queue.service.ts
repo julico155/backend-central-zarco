@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { DomainException } from '../common/exceptions/domain-exception';
 import { KYSELY } from '../database/database.module';
-import { Database } from '../database/types';
+import { Database, OrderChannel } from '../database/types';
 import { NotificationsOutService } from '../notifications-out/notifications-out.service';
 import { OperationalSettingsService } from '../operational-settings/operational-settings.service';
 import {
@@ -27,7 +27,7 @@ export interface AdmissionResult {
 
 export interface QueueSummary {
   enabled: boolean;
-  /** Pedidos que hoy ocupan la cocina (confirmado, preparando, listo). */
+  /** Pedidos de WhatsApp que hoy ocupan la cocina (confirmado, preparando, listo). No incluye el mostrador. */
   kitchenLoad: number;
   capacity: number;
   /** Clientes avisados que todavía no hicieron su pedido (cupos prometidos). */
@@ -46,8 +46,11 @@ export class QueueWaitingError extends DomainException {
   }
 }
 
-/** Canales de cliente: el mostrador (pos) nunca pasa por la fila. */
-const QUEUED_CHANNELS = new Set(['whatsapp', 'web']);
+/**
+ * Canales que pasan por la fila Y cuentan para llenar la cocina: WhatsApp (`web` es el canal con que se prueba el
+ * agente, que es el mismo camino del cliente). El mostrador (pos) no entra en ninguna de las dos cosas.
+ */
+const QUEUED_CHANNELS = new Set<OrderChannel>(['whatsapp', 'web']);
 
 /**
  * Cola de pedidos. Cuando está activa y la cocina se llena (capacidad configurable), los clientes nuevos esperan en
@@ -114,7 +117,7 @@ export class OrderQueueService {
    * reservó (o confirmó) su cupo; `markUsed` lo cierra cuando el pedido se crea.
    */
   async assertCanOrder(customerId: string | undefined, channel: string): Promise<void> {
-    if (!customerId || !QUEUED_CHANNELS.has(channel)) return;
+    if (!customerId || !QUEUED_CHANNELS.has(channel as OrderChannel)) return;
     const row = await this.settings.getRow();
     if (!row.queue_enabled) return;
 
@@ -246,13 +249,16 @@ export class OrderQueueService {
   }
 
   /**
-   * Pedidos que hoy ocupan la cocina. Mismo criterio que el tablero: un QR (o split) sin pagar no cuenta, porque
-   * cocina ni siquiera lo ve todavía. "En camino" ya no cuenta — por eso el tracking libera cupos.
+   * Pedidos de WhatsApp que hoy ocupan la cocina. Los del mostrador (pos) NO cuentan: la fila existe para ordenar a los
+   * clientes de WhatsApp y el mostrador nunca pasa por ella, así que sus pedidos no le quitan lugar a nadie en la fila.
+   * Mismo criterio que el tablero: un QR (o split) sin pagar no cuenta, porque cocina ni siquiera lo ve todavía.
+   * "En camino" ya no cuenta — por eso el tracking libera cupos.
    */
   private async kitchenLoad(db: Kysely<Database>): Promise<number> {
     const result = await db
       .selectFrom('orders')
       .select(sql<number>`count(*)::int`.as('n'))
+      .where('channel', 'in', [...QUEUED_CHANNELS])
       .where('status', 'in', ['confirmed', 'preparing', 'ready'])
       .where(sql<boolean>`not (payment_method in ('qr', 'split') and payment_status <> 'paid')`)
       .executeTakeFirstOrThrow();
